@@ -1408,9 +1408,7 @@ class StrataEngine:
                     freed.append(b)
             else:
                 self._orphan_seen.pop(b, None)
-        if freed:
-            print(f"[strata] parallel: slot(s) {', '.join(map(str, freed))} were marked busy with no request using them "
-                  "(issue #1603); freed, the waiting request goes on", flush=True)
+        if freed:                                   # the caller says so once slot_cv is released (#2432)
             self.slot_cv.notify_all()
         return freed
 
@@ -1590,20 +1588,29 @@ class StrataEngine:
                             if holding:
                                 self.ctl.release()
                                 holding = False
-                            with self.slot_cv:
-                                if self.pick_slot(prompt) is None:
-                                    if (ENGINE_STALL_S or 0) > 0 and time.monotonic() - admit_since >= ENGINE_STALL_S:
-                                        # the stall check of #1317 only watches a request on the control lines; one
-                                        # waiting here is covered by looking for a slot nobody owns, and by saying so
-                                        if not admit_said:
-                                            admit_said = True
-                                            busy = [b for b, v in enumerate(self.slot_busy) if v]
-                                            print(f"[strata] parallel: a request has waited {time.monotonic() - admit_since:.0f} s "
-                                                  f"for a free slot (busy: {busy}, in use: {sorted(self.slot_claims)}, "
-                                                  f"ending: {sorted(self.slot_releasing)}) (issue #1603)", flush=True)
-                                    self._reap_orphan_slots()
-                                if self.pick_slot(prompt) is None:
-                                    self.slot_cv.wait(timeout=1.0)
+                            said = []                       # #2432: printed once slot_cv is released
+                            try:
+                                with self.slot_cv:
+                                    if self.pick_slot(prompt) is None:
+                                        if (ENGINE_STALL_S or 0) > 0 and time.monotonic() - admit_since >= ENGINE_STALL_S:
+                                            # the stall check of #1317 only watches a request on the control lines; one
+                                            # waiting here is covered by looking for a slot nobody owns, and by saying so
+                                            if not admit_said:
+                                                admit_said = True
+                                                busy = [b for b, v in enumerate(self.slot_busy) if v]
+                                                said.append(f"[strata] parallel: a request has waited {time.monotonic() - admit_since:.0f} s "
+                                                            f"for a free slot (busy: {busy}, in use: {sorted(self.slot_claims)}, "
+                                                            f"ending: {sorted(self.slot_releasing)}) (issue #1603)")
+                                        freed = self._reap_orphan_slots()
+                                        if freed:
+                                            said.append(f"[strata] parallel: slot(s) {', '.join(map(str, freed))} were marked "
+                                                        "busy with no request using them (issue #1603); freed, the waiting "
+                                                        "request goes on")
+                                    if not said and self.pick_slot(prompt) is None:
+                                        self.slot_cv.wait(timeout=1.0)
+                            finally:                        # printed even if the block raised
+                                for line in said:
+                                    print(line, flush=True)
                             if cancel.is_set():
                                 return
                             if not holding:
@@ -4431,81 +4438,88 @@ class Service:
                     raise
                 finally:
                     # #266: settle this request's status, history and totals while still holding the fifo: once
-                    # it is released the next request sets its own status, which this must not record or clear
-                    with self.status_lock:
-                        if st.get("busy"):
-                            last = request_stats(segments)          # only this request's own DONEs count
-                            started = st.get("started", time.time())
-                            cvec = (getattr(self.engine, "info", {}) or {}).get("cvec", 0)
-                            loaded = str(cvec) not in ("0", "", "None")
-                            hit_rate = round(last["hits"] / last["lookups"], 3) if last.get("lookups") else None
-                            # #588: the share the GPU read over PCIe (--pcie-frac) or another GPU computed - not in
-                            # the hit rate's lookups, which is the VRAM share of the rest (None: an older engine)
-                            routed = (last.get("lookups") or 0) + (last.get("offloaded") or 0)
-                            pcie_share = round(last["offloaded"] / routed, 3) \
-                                if last.get("offloaded") is not None and routed else None
-                            seen = prompt_tokens_seen(len(ids), last)   # #471: < len(ids) when cancelled mid-read
-                            self.history.append({
-                                "projection": (sampling or {}).get("experimental_speed_projection") is not False
-                                if loaded else None,
-                                "time": started, "duration_s": round(time.time() - started, 1), "finish": finish,
-                                "prompt_tokens": seen, "reused": last.get("reused"), "output_tokens": n,
-                                # the request's whole prompt, and the tokens read of it (None: an older engine)
-                                "prompt_total": len(ids), "prompt_read": last.get("prompt_read"),
-                                "reasoning_recoveries": recovery_count,
-                                "reasoning_repeat_coverage": round(repeat_coverage, 3),
-                                "engine_generated": last.get("generated"),
-                                "prompt_ms": last.get("prompt_ms"), "decode_ms": last.get("decode_ms"),
-                                "decode_tok_s": round(last["generated"] / (last["decode_ms"] / 1000), 1)
-                                if n and last.get("generated") and last.get("decode_ms") else None,
-                                "hit_rate": hit_rate, "pcie_share": pcie_share, "ram_blobs": last.get("ram_blobs"),
-                                "file_blobs": last.get("file_blobs"), "file_mb": last.get("file_mb"),
-                                # #457: the speculative drafts from the DONE line (None: the engine did not say)
-                                "drafts_offered": last.get("drafts_offered"),
-                                "drafts_accepted": last.get("drafts_accepted")})
-                            t = self.totals
-                            t["requests"] += 1
-                            t["prompt_tokens"] += seen
-                            t["reused"] += last.get("reused") or 0
-                            t["output_tokens"] += n
-                            t["prompt_ms"] += last.get("prompt_ms") or 0.0
-                            t["decode_ms"] += last.get("decode_ms") or 0.0
-                            t["drafts_offered"] += last.get("drafts_offered") or 0
-                            t["drafts_accepted"] += last.get("drafts_accepted") or 0
-                            ft0 = st.get("first_token")             # this request's own (#465: one per request)
-                            self.latencies.observe(ft0 - started if ft0 else None, n,
-                                                   (last.get("decode_ms") or 0.0) / 1000, time.time() - started)
-                            fresh = getattr(self.engine, "last", None)
-                            if fresh is not None and fresh is not before:      # the engine's clock for THIS request
-                                timings = request_timings(seen, n, last)
-                                self.last_timings = dict(timings, at=int(time.time())) if timings else None
-                            self.last_request_at = time.time()
-                            now = time.time()
-                            el = now - st.get("started", now)
-                            ft = st.get("first_token")
-                            rate = n / max(1e-6, now - ft) if ft else 0.0
-                            hit_msg = f", expert cache {hit_rate*100:.1f}% hit" if hit_rate is not None else ""
-                            if hit_msg and pcie_share:
-                                hit_msg += f" (+{pcie_share*100:.1f}% of the routed experts over PCIe)"
-                            print(f"[strata] done: {n} tokens in {el:.0f} s ({rate:.1f} tok/s) "
-                                  f"({finish}, cancel={cancel.is_set()}){hit_msg}", flush=True)
-                            if finish == "length" and parser.state in ("reasoning", "rcall"):   # #530
-                                print("[strata] the reply reached max tokens while still thinking, so it has no "
-                                      "answer: a thinking budget (reasoning_budget_tokens, in the request or in "
-                                      "strata-<model>.json for every request) leaves room to answer", flush=True)
-                            if os.environ.get("STRATA_DEBUG") and raw_ids:
-                                print(f"[strata] raw: {self.tok.decode(raw_ids)!r}", flush=True)
-                        st["busy"] = False
-                        st.pop("tail", None)                     # #212: the answer's end is not kept once it is done
-                        st.pop("tool", None)
-                        if par:
-                            self.live_reqs.pop(id(st), None)
-                            if self.live_reqs:              # the newest request still running
-                                self.status.update(list(self.live_reqs.values())[-1][0])
-                            else:
-                                self.status.update(busy=False)
-                                self.status.pop("tail", None)
-                                self.status.pop("tool", None)
+                    # it is released the next request sets its own status, which this must not record or clear.
+                    # #2432: the lines are only built here and printed after the lock is released - a print can
+                    # block (a paused Windows console), and nothing that holds status_lock may wait on the console
+                    said = []
+                    try:
+                        with self.status_lock:
+                            if st.get("busy"):
+                                last = request_stats(segments)          # only this request's own DONEs count
+                                started = st.get("started", time.time())
+                                cvec = (getattr(self.engine, "info", {}) or {}).get("cvec", 0)
+                                loaded = str(cvec) not in ("0", "", "None")
+                                hit_rate = round(last["hits"] / last["lookups"], 3) if last.get("lookups") else None
+                                # #588: the share the GPU read over PCIe (--pcie-frac) or another GPU computed - not in
+                                # the hit rate's lookups, which is the VRAM share of the rest (None: an older engine)
+                                routed = (last.get("lookups") or 0) + (last.get("offloaded") or 0)
+                                pcie_share = round(last["offloaded"] / routed, 3) \
+                                    if last.get("offloaded") is not None and routed else None
+                                seen = prompt_tokens_seen(len(ids), last)   # #471: < len(ids) when cancelled mid-read
+                                self.history.append({
+                                    "projection": (sampling or {}).get("experimental_speed_projection") is not False
+                                    if loaded else None,
+                                    "time": started, "duration_s": round(time.time() - started, 1), "finish": finish,
+                                    "prompt_tokens": seen, "reused": last.get("reused"), "output_tokens": n,
+                                    # the request's whole prompt, and the tokens read of it (None: an older engine)
+                                    "prompt_total": len(ids), "prompt_read": last.get("prompt_read"),
+                                    "reasoning_recoveries": recovery_count,
+                                    "reasoning_repeat_coverage": round(repeat_coverage, 3),
+                                    "engine_generated": last.get("generated"),
+                                    "prompt_ms": last.get("prompt_ms"), "decode_ms": last.get("decode_ms"),
+                                    "decode_tok_s": round(last["generated"] / (last["decode_ms"] / 1000), 1)
+                                    if n and last.get("generated") and last.get("decode_ms") else None,
+                                    "hit_rate": hit_rate, "pcie_share": pcie_share, "ram_blobs": last.get("ram_blobs"),
+                                    "file_blobs": last.get("file_blobs"), "file_mb": last.get("file_mb"),
+                                    # #457: the speculative drafts from the DONE line (None: the engine did not say)
+                                    "drafts_offered": last.get("drafts_offered"),
+                                    "drafts_accepted": last.get("drafts_accepted")})
+                                t = self.totals
+                                t["requests"] += 1
+                                t["prompt_tokens"] += seen
+                                t["reused"] += last.get("reused") or 0
+                                t["output_tokens"] += n
+                                t["prompt_ms"] += last.get("prompt_ms") or 0.0
+                                t["decode_ms"] += last.get("decode_ms") or 0.0
+                                t["drafts_offered"] += last.get("drafts_offered") or 0
+                                t["drafts_accepted"] += last.get("drafts_accepted") or 0
+                                ft0 = st.get("first_token")             # this request's own (#465: one per request)
+                                self.latencies.observe(ft0 - started if ft0 else None, n,
+                                                       (last.get("decode_ms") or 0.0) / 1000, time.time() - started)
+                                fresh = getattr(self.engine, "last", None)
+                                if fresh is not None and fresh is not before:      # the engine's clock for THIS request
+                                    timings = request_timings(seen, n, last)
+                                    self.last_timings = dict(timings, at=int(time.time())) if timings else None
+                                self.last_request_at = time.time()
+                                now = time.time()
+                                el = now - st.get("started", now)
+                                ft = st.get("first_token")
+                                rate = n / max(1e-6, now - ft) if ft else 0.0
+                                hit_msg = f", expert cache {hit_rate*100:.1f}% hit" if hit_rate is not None else ""
+                                if hit_msg and pcie_share:
+                                    hit_msg += f" (+{pcie_share*100:.1f}% of the routed experts over PCIe)"
+                                said.append(f"[strata] done: {n} tokens in {el:.0f} s ({rate:.1f} tok/s) "
+                                            f"({finish}, cancel={cancel.is_set()}){hit_msg}")
+                                if finish == "length" and parser.state in ("reasoning", "rcall"):   # #530
+                                    said.append("[strata] the reply reached max tokens while still thinking, so it has no "
+                                                "answer: a thinking budget (reasoning_budget_tokens, in the request or in "
+                                                "strata-<model>.json for every request) leaves room to answer")
+                                if os.environ.get("STRATA_DEBUG") and raw_ids:
+                                    said.append(f"[strata] raw: {self.tok.decode(raw_ids)!r}")
+                            st["busy"] = False
+                            st.pop("tail", None)                     # #212: the answer's end is not kept once it is done
+                            st.pop("tool", None)
+                            if par:
+                                self.live_reqs.pop(id(st), None)
+                                if self.live_reqs:              # the newest request still running
+                                    self.status.update(list(self.live_reqs.values())[-1][0])
+                                else:
+                                    self.status.update(busy=False)
+                                    self.status.pop("tail", None)
+                                    self.status.pop("tool", None)
+                    finally:                            # printed even if the block raised (#2432)
+                        for line in said:
+                            print(line, flush=True)
         finally:
             if emb:
                 Path(emb).unlink(missing_ok=True)
