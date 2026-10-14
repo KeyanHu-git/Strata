@@ -19,6 +19,19 @@ SavedConversation image(std::initializer_list<int32_t> ids, bool cvec = true) {
     s.cvec = cvec;
     return s;
 }
+// a conversation `ids` that branched from the pinned shared prefix `pin`: its chain holds the pin and, deeper, a
+// checkpoint of its own (one token short of `ids`), so another holder does not supersede it (drop_superseded)
+SavedConversation holder(std::initializer_list<int32_t> ids, std::initializer_list<int32_t> pin) {
+    SavedConversation s = image(ids);
+    s.checkpoints.push_back(ConversationCheckpoint{});
+    s.checkpoints.back().ids = pin;
+    s.checkpoints.back().pinned = true;
+    s.checkpoints.back().gdn.resize(64, 1);
+    s.checkpoints.push_back(ConversationCheckpoint{});
+    s.checkpoints.back().ids.assign(ids.begin(), ids.end() - 1);
+    s.checkpoints.back().gdn.resize(64, 2);
+    return s;
+}
 }
 
 int main() {
@@ -557,6 +570,131 @@ int main() {
         p2.checkpoints.back().gdn.resize(64, 1);
         check(tiny.put(std::move(p2)), "a pinned one fits an empty cache");
         check(!tiny.put(image({7,8,9})) && tiny.size() == 1, "nothing else fits beside it: parking is refused, the pin stays");
+    }
+    {   // #2255: a client that pins one prefix on every request fills every slot with its holders; parking goes on
+        const size_t one = holder({1,2,3,4}, {1,2}).bytes();
+        ConversationCache cache(one * 8, 3);
+        check(cache.put(holder({1,2,3,4}, {1,2})) && cache.put(holder({1,2,5,6}, {1,2})) &&
+              cache.put(holder({1,2,7,8}, {1,2})) && cache.size() == 3, "three holders of one pin fill the slots");
+        check(cache.put(holder({1,2,9,10}, {1,2})) && cache.size() == 3 && cache.evictions() == 1,
+              "a fourth holder is parked: the oldest holder goes (#2255)");
+        check(cache.best(std::vector<int32_t>{1,2,3,4,0}, {}, true).tokens == 2,
+              "the oldest holder's own tail is gone");
+        check(cache.best(std::vector<int32_t>{1,2,9,10,0}, {}, true).tokens == 4, "the newest holder is kept");
+        check(cache.put(image({20,21,22})) && cache.best(std::vector<int32_t>{1,2,0}, {}, true).tokens == 2,
+              "an unpinned conversation is parked too, and the pinned prefix is still found");
+    }
+    {   // #2255: two pins side by side - the oldest entry is the only holder of pin A, so it stays and a B holder goes
+        const size_t one = holder({1,2,3,4}, {1,2}).bytes();
+        ConversationCache cache(one * 8, 3);
+        cache.put(holder({1,2,3,4}, {1,2}));                              // A: oldest and its only holder
+        cache.put(holder({5,6,7,8}, {5,6}));
+        cache.put(holder({5,6,9,10}, {5,6}));
+        check(cache.put(holder({5,6,11,12}, {5,6})) && cache.size() == 3, "a third B holder is parked");
+        check(cache.best(std::vector<int32_t>{1,2,0}, {}, true).tokens == 2, "pin A (held once) survives");
+        check(cache.best(std::vector<int32_t>{5,6,7,8,0}, {}, true).tokens == 2, "the oldest B holder went instead");
+        check(cache.best(std::vector<int32_t>{5,6,0}, {}, true).tokens == 2, "pin B is still found");
+    }
+    {   // #2255: each entry the last holder of its own pin - nothing can go, parking is refused, every pin stays
+        const size_t one = holder({1,2,3,4}, {1,2}).bytes();
+        ConversationCache cache(one * 8, 2);
+        cache.put(holder({1,2,3,4}, {1,2}));
+        cache.put(holder({5,6,7,8}, {5,6}));
+        check(!cache.evict_oldest() && cache.size() == 2, "the last holder of each pin is never evicted");
+        check(!cache.put(image({9,10,11})) && cache.size() == 2 && cache.evictions() == 0,
+              "parking is refused while every entry is a pin's last holder");
+    }
+    {   // Identical tokens with different steering modes are different pins.
+        auto a = holder({1,2,3,4}, {1,2});
+        auto b = holder({1,2,5,6}, {1,2}); b.cvec = false;
+        ConversationCache cache((a.bytes() + b.bytes()) * 4, 2);
+        check(cache.put(std::move(a)) && cache.put(std::move(b)), "different cvec holders parked");
+        const size_t before = cache.bytes();
+        check(!cache.evict_oldest() && cache.bytes() == before, "different cvec cannot replace the last holder");
+    }
+    {   // Identical tokens with different images are different pins.
+        auto a = holder({1,2,3,4}, {1,2}); a.checkpoints[0].imgs = {{0, 100}};
+        auto b = holder({1,2,5,6}, {1,2}); b.checkpoints[0].imgs = {{0, 200}};
+        ConversationCache cache((a.bytes() + b.bytes()) * 4, 2);
+        check(cache.put(std::move(a)) && cache.put(std::move(b)), "different image holders parked");
+        check(!cache.evict_oldest() && cache.size() == 2, "image identity protects both pins");
+    }
+    {   // Every pin in a multi-pin entry must have a surviving holder; one duplicate is not enough.
+        auto a = holder({1,2,3,4}, {1,2});
+        auto cp = a.checkpoints[0]; cp.ids = {1}; a.checkpoints.push_back(cp);
+        auto b = holder({1,2,5,6}, {1,2});
+        const size_t kept = a.bytes();
+        ConversationCache cache((a.bytes() + b.bytes()) * 4, 2);
+        check(cache.put(std::move(a)) && cache.put(std::move(b)), "multi-pin and newer single-pin holders parked");
+        check(cache.evict_oldest() && cache.size() == 1, "newer redundant holder goes when oldest has a unique pin");
+        check(cache.bytes() == kept && cache.evictions() == 1, "eviction updates exact byte and entry accounting");
+        check(cache.best(std::vector<int32_t>{1,0}, {}, true).tokens == 1, "unique short pin survives");
+        check(cache.best(std::vector<int32_t>{1,2,0}, {}, true).tokens == 2, "shared pin also survives");
+    }
+    {   // Redundant image pins can make room under a byte budget, not only a slot limit.
+        auto a = holder({1,2,3,4}, {1,2}); a.checkpoints[0].imgs = {{0, 100}};
+        auto b = holder({1,2,5,6}, {1,2}); b.checkpoints[0].imgs = {{0, 100}};
+        const size_t budget = a.bytes() + b.bytes(), kept = b.bytes();
+        ConversationCache cache(budget, 8);
+        check(cache.put(std::move(a)) && cache.put(std::move(b)), "image pin holders fill byte budget");
+        check(cache.make_room(1) && cache.size() == 1 && cache.bytes() == kept, "redundant holder evicted for byte pressure");
+        check(cache.best(std::vector<int32_t>{1,2,0}, {{0,100}}, true).tokens == 2, "same image pin remains usable");
+    }
+    {   // #2255 beside a borrow: the guarded donor stays and counts as a holder; redundant holders still make room
+        auto cp = [](std::vector<int32_t> ids, bool pinned = false) {
+            ConversationCheckpoint c; c.ids = std::move(ids); c.pinned = pinned; return c;
+        };
+        // two holders of one pin and an unpinned donor fill three slots: the precheck must not count both holders as
+        // staying, or the borrow is refused although the oldest holder can go
+        SavedConversation donor = image({7, 8, 9, 10, 11});
+        donor.checkpoints = {cp({7, 8}), cp({7, 8, 9, 10})};
+        ConversationCache cache(1 << 20, 3);
+        check(cache.put(holder({1,2,3,4}, {1,2})) && cache.put(holder({1,2,5,6}, {1,2})) && cache.put(std::move(donor)),
+              "two holders of one pin and a donor fill the slots");
+        const auto m = cache.best(std::vector<int64_t>{7, 8, 40}, {}, true);
+        check(cache.borrows(m), "a sibling on the donor's root borrows");
+        cache.guard(m.serial);
+        check(cache.put(image({9, 9, 9})) && !cache.guard_blocked() && cache.size() == 3 && cache.evictions() == 1,
+              "the outgoing conversation parks beside the donor: a redundant holder makes room");
+        check(cache.find(m.serial) != nullptr && cache.best(std::vector<int32_t>{1,2,3,4,0}, {}, true).tokens == 2 &&
+              cache.best(std::vector<int32_t>{1,2,5,6,0}, {}, true).tokens == 4,
+              "the oldest holder went; the newer holder and the donor stay");
+        check(cache.put(image({6, 6, 6})) && !cache.guard_blocked() && cache.evictions() == 2 &&
+              cache.best(std::vector<int64_t>{9, 9, 9, 1}, {}, true).tokens == 0,
+              "the next outgoing one evicts the previous outgoing one, not the pin's last holder");
+        check(cache.best(std::vector<int32_t>{1,2,0}, {}, true).tokens == 2 && cache.find(m.serial) != nullptr,
+              "the pin and the donor survive further parks");
+        cache.unguard();
+
+        // the guarded donor holds the pin past the borrowed root: it keeps the pin parked, so an older holder can go,
+        // and it is never the one evicted even when it is a redundant holder itself
+        SavedConversation doc = image({1, 2, 3, 4, 5, 6, 30});
+        doc.checkpoints = {cp({1, 2}), cp({1, 2, 3, 4, 5, 6}, true), cp({1, 2, 3, 4, 5, 6, 30})};
+        ConversationCache two(1 << 20, 2);
+        check(two.put(holder({1,2,3,4,5,6,50,51}, {1,2,3,4,5,6})) && two.put(std::move(doc)) && two.size() == 2,
+              "an older holder and a donor holding the same pin fill two slots");
+        const auto md = two.best(std::vector<int64_t>{1, 2, 40}, {}, true);
+        check(md.tokens == 2 && two.borrows(md), "a match short of the pin borrows the donor");
+        two.guard(md.serial);
+        check(two.put(image({9, 9, 9})) && !two.guard_blocked() && two.size() == 2 && two.evictions() == 1,
+              "the older holder goes: the guarded donor still holds the pin");
+        check(two.find(md.serial) != nullptr &&
+              two.best(std::vector<int32_t>{1,2,3,4,5,6,50,51,0}, {}, true).tokens == 6,
+              "the donor stays and the pin is still found");
+        two.unguard();
+        ConversationCache young(1 << 20, 2);
+        SavedConversation doc2 = image({1, 2, 3, 4, 5, 6, 30});
+        doc2.checkpoints = {cp({1, 2}), cp({1, 2, 3, 4, 5, 6}, true), cp({1, 2, 3, 4, 5, 6, 30})};
+        check(young.put(std::move(doc2)) && young.put(holder({1,2,3,4,5,6,50,51}, {1,2,3,4,5,6})),
+              "a donor and a newer holder of the same pin fill two slots");
+        const auto my = young.best(std::vector<int64_t>{1, 2, 40}, {}, true);
+        check(young.borrows(my) && young.index_of(my.serial) == 0, "the oldest entry is the donor");
+        young.guard(my.serial);
+        check(young.put(image({9, 9, 9})) && !young.guard_blocked() && young.evictions() == 1 &&
+              young.size() == 2 && young.find(my.serial) != nullptr &&
+              young.best(std::vector<int32_t>{1,2,3,4,5,6,50,51,0}, {}, true).tokens == 6,
+              "the oldest redundant holder is the guarded donor: the newer holder goes instead");
+        young.unguard();
     }
     std::printf("conversation_cache_test: %d checks passed\n", checks);
 }
