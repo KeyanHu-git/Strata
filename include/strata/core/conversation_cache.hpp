@@ -26,7 +26,7 @@ struct ConversationCheckpoint {
     std::vector<uint8_t> gdn, ple, tails, dead, block_pos;
     uint64_t used = 0; // upstream root-pinned/LRU checkpoint retention
     // A shared-prefix pin (the request key pin=N): this checkpoint is the read-only prefix many suffix queries branch
-    // from, so retention never evicts it (conv_cache.hpp) and a parked conversation holding it stays parked.  A run-time
+    // from, so retention never evicts it (conv_cache.hpp) and the parked cache keeps at least one holder.  A run-time
     // mark only: it is not in the session file, a request that pins the same prefix again sets it.
     bool pinned = false;
     // Ordinary layer-split checkpoints retain each device's running state.
@@ -267,8 +267,9 @@ public:
         if (!enabled() || held > budget_ || incoming > budget_ - held) return false;
         if (bytes() > budget_ - held - incoming) reuse_ = {};
         while (!entries_.empty() && (entries_.size() >= slots_ || bytes_ > budget_ - held - incoming)) {
-            // the oldest entry that does not hold a pinned shared prefix leaves; with only pinned ones left the new
-            // image does not fit (the caller skips parking it - the pinned prefix is what the queries come back to)
+            // the oldest entry without a pinned shared prefix leaves, then the oldest pinned one whose prefixes another
+            // entry still holds; when each entry left is the last holder of a prefix the new image does not fit (the
+            // caller skips parking it - the pinned prefix is what the queries come back to)
             if (!evict_oldest()) return false;
         }
         return true;
@@ -279,9 +280,16 @@ public:
     // gate in generate.cpp).  A ConversationBuffer is a list of 16 MiB segments and each segment is its
     // own allocation, far above glibc's mmap threshold, so dropping an entry returns the whole footprint
     // to the kernel at once - the next admission check reads it back from /proc/meminfo.
-    // False when none can go (empty, or only entries that hold a pinned shared prefix are left).
+    // A pin keeps its shared prefix parked, not every conversation that branched from it (#2255): the oldest entry
+    // without a pin goes first; with only pinned ones left, the oldest whose every pinned prefix another entry
+    // still holds goes, so every prefix keeps at least one holder.  A client that pins its system prompt on every
+    // request fills every slot with holders of that one prefix, and refusing them all refused every later park.
+    // False when none can go (empty, or each entry left is the last holder of a pinned prefix).
     bool evict_oldest() {
         auto victim = std::find_if(entries_.begin(), entries_.end(), [](const SavedConversation& e) { return !e.pinned(); });
+        if (victim == entries_.end())
+            victim = std::find_if(entries_.begin(), entries_.end(),
+                                  [&](const SavedConversation& e) { return pins_held_elsewhere(e); });
         if (victim == entries_.end()) return false;
         bytes_ -= victim->bytes();
         entries_.erase(victim);
@@ -347,6 +355,22 @@ public:
     }
 
 private:
+    // Every pinned prefix `e` holds is held (same tokens and images, pinned) by another parked entry.
+    bool pins_held_elsewhere(const SavedConversation& e) const {
+        for (const auto& c : e.checkpoints) {
+            if (!c.pinned) continue;
+            bool held = false;
+            for (const auto& o : entries_) {
+                if (&o == &e || o.cvec != e.cvec) continue;
+                for (const auto& k : o.checkpoints)
+                    if (k.pinned && k.ids == c.ids && k.imgs == c.imgs) { held = true; break; }
+                if (held) break;
+            }
+            if (!held) return false;
+        }
+        return true;
+    }
+
     size_t budget_ = 0, slots_ = 0, bytes_ = 0, evictions_ = 0, superseded_ = 0;
     int64_t min_tokens_ = 0;   // --conversation-cache-min-tokens: 0 parks every conversation, whatever its size
     std::deque<SavedConversation> entries_; // least recently active first
