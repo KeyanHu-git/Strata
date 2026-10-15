@@ -18,9 +18,10 @@ inline constexpr size_t kNativeActBytes = 4096;
 /// Bytes of the largest quantized down activation (640 values as Q8_0: 20 x 34, or Q8_K 3 x 292).
 inline constexpr size_t kNativeHBytes = 1024;
 
-/// One layer's native expert geometry.
+/// Arithmetic fixed for one pool batch. WindowInvariant preserves the legacy singleton result at every width.
 enum class NativeArithmetic { Default, WindowInvariant };
 
+/// One layer's native expert geometry.
 struct NativeFmt {
     int gu_type = -1, d_type = -1;      ///< ggml types of gate/up and of down
     int gu_act = -1, d_act = -1;        ///< their vec_dot_type (the activation formats)
@@ -58,9 +59,11 @@ void native_gu_rows(const NativeFmt& f, const uint8_t* blob, const void* const* 
 void native_down_rows(const NativeFmt& f, const uint8_t* blob, const void* const* hq, int nt, float* const* out,
                       int r0, int r1);
 
-}  // namespace strata::kernels::cpu
+/// Same per-token result as the corresponding legacy nt=1 call on this build and CPU.
+/// Kernels that already satisfy this contract retain their grouped execution.
+void native_gu_rows_invariant(const NativeFmt& f, const uint8_t* blob, const void* const* act, int nt,
+                              float* const* ff, int r0, int r1);
+void native_down_rows_invariant(const NativeFmt& f, const uint8_t* blob, const void* const* hq, int nt,
+                                float* const* out, int r0, int r1);
 
-namespace strata::kernels::cpu {
-void native_gu_rows_invariant(const NativeFmt&, const uint8_t*, const void* const*, int, float* const*, int, int);
-void native_down_rows_invariant(const NativeFmt&, const uint8_t*, const void* const*, int, float* const*, int, int);
-}
+}  // namespace strata::kernels::cpu

@@ -8,6 +8,7 @@
 #include <cstring>
 #include <random>
 #include <vector>
+#include <utility>
 
 namespace cpu = strata::kernels::cpu;
 namespace {
@@ -33,14 +34,22 @@ bool check_format(int gu, int down, int ff) {
     std::vector<uint8_t> blob(fmt.bytes);
     for (auto &byte : blob)
         byte = static_cast<uint8_t>(rng());
-    // These formats begin each block with an FP16 scale. All remaining packed bit patterns are valid.
+    // Use finite block scales and random packed values. NVFP4 has four UE4M3 sub-block scales.
     const uint16_t scale = 0x2400; // 2^-6; exclude NaN/Inf scales from the random bytes.
-    const size_t gu_block = ggml_type_size(static_cast<ggml_type>(gu));
-    const size_t down_block = ggml_type_size(static_cast<ggml_type>(down));
-    for (size_t at = 0; at < fmt.down_off; at += gu_block)
-        std::memcpy(blob.data() + at, &scale, sizeof(scale));
-    for (size_t at = fmt.down_off; at < blob.size(); at += down_block)
-        std::memcpy(blob.data() + at, &scale, sizeof(scale));
+    auto scales = [&](size_t first, size_t last, int type) {
+        const size_t block = ggml_type_size(static_cast<ggml_type>(type));
+        for (size_t at = first; at < last; at += block) {
+            if (type == cpu::kNvfp4Type) std::memset(blob.data() + at, 0x28, 4); // finite UE4M3 sub-block scales
+            else std::memcpy(blob.data() + at, &scale, sizeof(scale));
+        }
+    };
+    scales(0, fmt.down_off, gu);
+    scales(fmt.down_off, fmt.tail_off ? fmt.tail_off : blob.size(), down);
+    if (fmt.tail_off) {
+        const float tail[4] = {gu == cpu::kNvfp4Type ? .5f : 1.f, gu == cpu::kNvfp4Type ? .75f : 1.f,
+                               down == cpu::kNvfp4Type ? 1.25f : 1.f, 0.f};
+        std::memcpy(blob.data() + fmt.tail_off, tail, sizeof(tail));
+    }
 
     std::vector<std::vector<uint8_t>> act(width, std::vector<uint8_t>(fmt.act_bytes));
     std::vector<std::vector<uint8_t>> hq(width, std::vector<uint8_t>(fmt.h_bytes));
@@ -90,5 +99,8 @@ int main() {
         if (!check_format(gu, 20, 64) || !check_format(gu, 20, 96) || !check_format(gu, 42, 64))
             return 1;
     }
+    // NVFP4's kernels already preserve singleton arithmetic. Mixed formats also carry scale tails.
+    for (auto pair : {std::pair{40, 40}, {40, 20}, {40, 42}, {22, 40}, {23, 40}})
+        if (!check_format(pair.first, pair.second, 64)) return 1;
     std::printf("native_arithmetic_parity: %zu finite bitwise comparisons passed\n", checked);
 }
