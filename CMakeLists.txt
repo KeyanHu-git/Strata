@@ -1377,6 +1377,10 @@ if(STRATA_NATIVE_EXPERTS)
     add_executable(native_arithmetic_parity src/kernels/cpu/native_arithmetic_parity.cpp)
     target_link_libraries(native_arithmetic_parity PRIVATE strata_kernels_cpu)
     add_test(NAME native_arithmetic_parity COMMAND native_arithmetic_parity)
+    add_test(NAME native_arithmetic_parity_avx COMMAND ${CMAKE_COMMAND} -E env
+             STRATA_FORCE_ISA=avx $<TARGET_FILE:native_arithmetic_parity>)
+    add_test(NAME native_arithmetic_parity_kq256 COMMAND ${CMAKE_COMMAND} -E env
+             STRATA_KQ256=1 $<TARGET_FILE:native_arithmetic_parity>)
     add_test(NAME native_arithmetic_parity_mt1 COMMAND ${CMAKE_COMMAND} -E env STRATA_IQ_MT_MIN=1 $<TARGET_FILE:native_arithmetic_parity>)
     add_test(NAME native_arithmetic_parity_no512 COMMAND ${CMAKE_COMMAND} -E env STRATA_NO_IQ512=1 $<TARGET_FILE:native_arithmetic_parity>)
     add_test(NAME native_arithmetic_parity_ggml COMMAND ${CMAKE_COMMAND} -E env STRATA_NO_IQ512=1 STRATA_NO_IQ256=1 STRATA_NO_IQ4NL=1 $<TARGET_FILE:native_arithmetic_parity>)

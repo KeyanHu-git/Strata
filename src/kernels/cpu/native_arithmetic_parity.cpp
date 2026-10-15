@@ -40,7 +40,10 @@ bool check_format(int gu, int down, int ff) {
         const size_t block = ggml_type_size(static_cast<ggml_type>(type));
         for (size_t at = first; at < last; at += block) {
             if (type == cpu::kNvfp4Type) std::memset(blob.data() + at, 0x28, 4); // finite UE4M3 sub-block scales
-            else std::memcpy(blob.data() + at, &scale, sizeof(scale));
+            else {
+                std::memcpy(blob.data() + at, &scale, sizeof(scale));
+                if (type == 12 || type == 7) std::memcpy(blob.data() + at + 2, &scale, sizeof(scale));
+            }
         }
     };
     scales(0, fmt.down_off, gu);
@@ -102,5 +105,7 @@ int main() {
     // NVFP4's kernels already preserve singleton arithmetic. Mixed formats also carry scale tails.
     for (auto pair : {std::pair{40, 40}, {40, 20}, {40, 42}, {22, 40}, {23, 40}})
         if (!check_format(pair.first, pair.second, 64)) return 1;
+    // STRATA_KQ256 selects grouped Q4_K/Q5_1/Q8_0 kernels only when their target arithmetic matches.
+    if (!check_format(12, 7, 64) || !check_format(12, 8, 64)) return 1;
     std::printf("native_arithmetic_parity: %zu finite bitwise comparisons passed\n", checked);
 }
