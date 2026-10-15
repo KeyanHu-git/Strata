@@ -1,4 +1,4 @@
-"""serve/test_first_chunk.py - #2391: no data chunk before the prompt is read; the role chunk first, exactly once.
+"""serve/test_first_chunk.py - #2391: open with the first response data; emit the role exactly once.
 
     python -m unittest serve.test_first_chunk -v
 """
@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from serve.frontend import Event, ToolCall  # noqa: E402
@@ -87,6 +88,43 @@ class RoleChunkAfterPrefill(unittest.TestCase):
         chunks = self.check(stream([("ping", None), "prompt-read",
                                     ("event", Event("tool_call", call=ToolCall("f", {}))), DONE]))
         self.assertIn("tool_calls", chunks[1]["choices"][0]["delta"])
+
+    def test_reasoning_opens_before_content(self):
+        chunks = self.check(stream([("ping", None), "prompt-read",
+                                    ("event", Event("reasoning", "Let me check.")),
+                                    ("event", Event("content", "42")), DONE]))
+        self.assertEqual(chunks[1]["choices"][0]["delta"], {"reasoning_content": "Let me check."})
+        self.assertEqual(chunks[2]["choices"][0]["delta"], {"content": "42"})
+
+    def test_requested_progress_opens_during_prefill(self):
+        svc = FakeSvc([("ping", None), ("ping", None), "prompt-read",
+                       ("event", Event("content", "hi")), DONE])
+        svc.engine = SimpleNamespace(progress=(100, 1000), reused=50, progress_ms=25)
+        out = [(svc.read, c) for c in openai_chunks(svc, {"return_progress": True},
+                                                   [1], False, None, 16, None)]
+        self.assertFalse(out[0][0])
+        chunks = [c for _, c in out]
+        self.assertEqual(chunks[0]["choices"][0]["delta"], ROLE)
+        self.assertEqual(chunks[1]["prompt_progress"],
+                         {"total": 1000, "cache": 50, "processed": 100, "time_ms": 25})
+        self.assertEqual(sum("role" in c["choices"][0]["delta"] for c in chunks), 1)
+
+    def test_unavailable_progress_keeps_stream_closed(self):
+        out = stream([("ping", None), "prompt-read", DONE], {"return_progress": True})
+        self.assertIsNone(out[0][1])
+        self.check(out)
+
+    def test_mcp_data_opens_stream_once_across_rounds(self):
+        svc = FakeSvc([])
+        events = [("ping", None), ("mcp", {"state": "calling"}), ("ping", None),
+                  ("mcp", {"state": "done"}), ("event", Event("content", "ok")), DONE]
+        chunks = list(openai_chunks(svc, {}, [1], False, None, 16, None, run=iter(events)))
+        self.assertIsNone(chunks[0])
+        self.assertEqual(chunks[1]["choices"][0]["delta"], ROLE)
+        self.assertEqual(chunks[2]["strata_mcp"], {"state": "calling"})
+        self.assertIsNone(chunks[3])
+        self.assertEqual(chunks[4]["strata_mcp"], {"state": "done"})
+        self.assertEqual(sum("role" in c["choices"][0]["delta"] for c in chunks if c), 1)
 
     def test_error_before_first_token(self):
         def boom():
