@@ -1284,7 +1284,9 @@ without penalties, so more of its guesses are now rejected. Requests without pen
 
 In probabilistic mode, `--spec-min-p` uses q's largest probability (`top`), which does not depend on the token drawn from q. `STRATA_SPEC_PROB_GATE=pick` explicitly selects the earlier approximate rule. Suffix-source choices use the committed context, configured MTP window, and a policy snapshot fixed for the request. New round costs train the live policy for later requests: discarded lookahead can reuse position-keyed random draws, so its timings cannot select sources within the same request. CLI generation uses its initial policy throughout. `spec_admission_test` enumerates these probability laws without Monte Carlo.
 
-Distribution comparisons also need a common target evaluator. For IQ models on the CPU, use `STRATA_IQ_MT_MIN=1` when comparing verify-window widths: otherwise single-token and multi-token kernels can change p before sampling (see **Reproducible greedy output** above).
+Probabilistic decode uses the ordinary one-token result as the reference for native CPU experts, regardless of job width. Kernels keep shared weight decoding when they match that result; other IQ paths use the corresponding singleton dot. Prefill and ordinary or coupled decode retain their existing arithmetic dispatch. `native_arithmetic_parity` checks group widths, mixed formats and dispatch overrides.
+
+Comparisons between other decode modes still need a common target evaluator. `STRATA_IQ_MT_MIN=1` selects the existing grouped IQ arithmetic at every width and also affects prefill; keep the setting identical across comparison arms. See **Reproducible greedy output** above.
 
 
 ---
