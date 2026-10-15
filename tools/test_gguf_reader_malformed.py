@@ -92,6 +92,23 @@ class LastTensorSize(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_metadata_only_shards_need_no_tensor_alignment_padding(self):
+        # A complete metadata directory ends at byte 84; its hypothetical data start is 96.
+        kv = gstr(b"general.name") + struct.pack("<I", 8) + gstr(b"m" * 28)
+        for raw in (header(0), header(0, kv, 1)):
+            for padded in (False, True):
+                with self.subTest(header_bytes=len(raw), padded=padded):
+                    s = self.dir / "metadata.gguf"
+                    s.write_bytes(pad(raw, 0) if padded else raw)
+                    self.assertEqual(GGUFFile(s).data_end(), len(raw))
+                    self.assertTrue(S.whole_shard(s))
+                    S.check_shards([s])
+            # Dropping metadata bytes is still a truncated header, not an empty payload.
+            s.write_bytes(raw[:-1])
+            self.assertFalse(S.whole_shard(s))
+            with self.assertRaises(Stop):
+                S.check_shards([s])
+
     def test_unknown_type_last_tensor_truncated_is_not_whole(self):
         # type 4 (Q4_2) has no block geometry: the shard's needed length cannot be computed from its header
         s = self.dir / "m-00001-of-00001.gguf"
