@@ -101,8 +101,9 @@ class GGUFFile:
         self.data_start = self._data_start
 
     def data_end(self) -> int:
-        """Return the largest tensor end; unknown sizes cannot establish completeness."""
-        end = self.data_start
+        """Return the required file extent; unknown tensor sizes cannot establish completeness."""
+        # Alignment locates tensor data. A metadata-only file ends at its parsed header.
+        end = self._pos
         unknown = []
         for tensor in self.tensors:
             size = tensor.expected_bytes()
