@@ -1024,12 +1024,12 @@ void drive_pool(void* user, const float* x_f, const int32_t* ids, const float* w
 }
 
 /// Plan v0.3 P6: the pool for a verify window.
-void drive_pool_multi(void* user, const float* x_f, const int32_t* ids, int64_t n_tok, int64_t k, float* out,
-                      int64_t layer) {
+void drive_pool_multi_impl(void* user, const float* x_f, const int32_t* ids, int64_t n_tok, int64_t k, float* out,
+                      int64_t layer, strata::kernels::cpu::NativeArithmetic arithmetic) {
     Drive* t = (Drive*) user;
     t->d.layers = layer;
     const Clock::time_point a = Clock::now();
-    strata::core::expert_pool_dispatch_multi(t->d, x_f, ids, n_tok, k, out);
+    strata::core::expert_pool_dispatch_multi(t->d, x_f, ids, n_tok, k, out, arithmetic);
     t->cpu_ms += std::chrono::duration<double, std::milli>(Clock::now() - a).count();
     ++t->calls;
     // the routing trace for the serve path: the same record format drive_pool writes (layer, k, ids, weights),
@@ -1047,6 +1047,13 @@ void drive_pool_multi(void* user, const float* x_f, const int32_t* ids, int64_t 
     }
 }
 
+void drive_pool_multi(void* u, const float* x, const int32_t* ids, int64_t n, int64_t k, float* out, int64_t l) {
+    drive_pool_multi_impl(u,x,ids,n,k,out,l,strata::kernels::cpu::NativeArithmetic::Default);
+}
+void drive_pool_multi_invariant(void* u, const float* x, const int32_t* ids, int64_t n, int64_t k, float* out, int64_t l) {
+    drive_pool_multi_impl(u,x,ids,n,k,out,l,strata::kernels::cpu::NativeArithmetic::WindowInvariant);
+}
+
 /// Layer split: every verify stage shares one Drive (its counters, usage and failure flags); the GPU plan, the expert
 /// cache and the PCIe share the pool uses for a layer are those of the stage that runs it.
 struct SplitDrive {
@@ -1059,8 +1066,8 @@ struct SplitDrive {
     const uint64_t* cache_slot_off[kMax] = {};
     int pcie_num[kMax] = {};
 };
-void drive_pool_split(void* user, const float* x_f, const int32_t* ids, int64_t n_tok, int64_t k, float* out,
-                      int64_t layer) {
+void drive_pool_split_impl(void* user, const float* x_f, const int32_t* ids, int64_t n_tok, int64_t k, float* out,
+                      int64_t layer, strata::kernels::cpu::NativeArithmetic arithmetic) {
     SplitDrive* s = (SplitDrive*) user;
     int st = 0;
     while (st + 1 < s->n && layer >= s->end[st]) ++st;
@@ -1069,7 +1076,14 @@ void drive_pool_split(void* user, const float* x_f, const int32_t* ids, int64_t 
     d.d.cache_base = s->cache_base[st];
     d.d.cache_slot_off = s->cache_slot_off[st];
     d.d.pcie_num = s->pcie_num[st];
-    drive_pool_multi(s->base, x_f, ids, n_tok, k, out, layer);
+    drive_pool_multi_impl(s->base, x_f, ids, n_tok, k, out, layer, arithmetic);
+}
+
+void drive_pool_split(void* u, const float* x, const int32_t* ids, int64_t n, int64_t k, float* out, int64_t l) {
+    drive_pool_split_impl(u,x,ids,n,k,out,l,strata::kernels::cpu::NativeArithmetic::Default);
+}
+void drive_pool_split_invariant(void* u, const float* x, const int32_t* ids, int64_t n, int64_t k, float* out, int64_t l) {
+    drive_pool_split_impl(u,x,ids,n,k,out,l,strata::kernels::cpu::NativeArithmetic::WindowInvariant);
 }
 
 /// Layer split across GPUs: a later stage on its own device, with its own copy of the dense weights, a session, an
@@ -8001,6 +8015,7 @@ int main(int argc, char** argv) {
         }
         // the pool the verify windows call: with a layer split, the wrapper that routes each layer to its stage
         const strata::core::PoolMultiFn win_pool_fn = n_stages > 1 ? &drive_pool_split : &drive_pool_multi;
+        const strata::core::PoolMultiFn invariant_win_pool_fn = n_stages > 1 ? &drive_pool_split_invariant : &drive_pool_multi_invariant;
         void* const win_pool_user = n_stages > 1 ? (void*) &split_drive : (void*) &drive;
         mem_mark("the verifier and the drafter's binding");
         ver.set_split(o.spec_split);
@@ -12658,7 +12673,9 @@ int main(int argc, char** argv) {
                 // STRATA_SPEC_PROB: the MTP drafts' distributions q, judged by rejection sampling (core/spec_prob.hpp);
                 // a suffix window and the lookup chain's tail are point masses and keep the exact-match rule
                 if (use_mtp && mtp.prob() && !from_sfx && T_mtp > 1) ver.set_spec_q(mtp.spec_q(), T_mtp - 1);
-                if (!ver.run(T, window.data(), p, win_pool_fn, win_pool_user, outv.data(), err) || drive.d.failed) {
+                const auto decode_pool_fn = use_mtp && mtp.prob()
+                    ? invariant_win_pool_fn : win_pool_fn;
+                if (!ver.run(T, window.data(), p, decode_pool_fn, win_pool_user, outv.data(), err) || drive.d.failed) {
                     std::printf("ERR %s\n", drive.d.failed && drive.d.fail ? drive.d.fail : err.c_str());
                     return 1;
                 }
@@ -13819,7 +13836,8 @@ int main(int argc, char** argv) {
             if (adapt_nowait()) apply_pending(false);
                 else if (pending.empty() || ++pending_age >= adapt_lag()) apply_pending(true);
             if (use_mtp && mtp.prob() && !from_sfx && T_mtp > 1 && o.spec_corrupt <= 0) ver.set_spec_q(mtp.spec_q(), T_mtp - 1);
-            if (!ver.run(T, window.data(), p, &drive_pool_multi, &drive, outv.data(), err)) {
+            const auto decode_pool_fn = use_mtp && mtp.prob() ? &drive_pool_multi_invariant : &drive_pool_multi;
+            if (!ver.run(T, window.data(), p, decode_pool_fn, &drive, outv.data(), err)) {
                 std::fprintf(stderr, "strata generate: %s\n", err.c_str());
                 return 1;
             }
