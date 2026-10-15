@@ -70,9 +70,13 @@ class PausedConsoleDoesNotHoldStatusLock(unittest.TestCase):
                 got = svc.status_lock.acquire(timeout=2)
                 if got:
                     svc.status_lock.release()
+                got_turn = svc.fifo.acquire(timeout=2)
+                if got_turn:
+                    svc.fifo.release()
                 console.resume.set()
                 t.join(15)
             self.assertTrue(got, "status_lock stayed held while the done line waited on the console (#2432)")
+            self.assertTrue(got_turn, "the completed request kept the engine turn while its console write blocked")
             self.assertFalse(t.is_alive())
             self.assertEqual(result.get("code"), 200)
             out = "".join(console.lines)
