@@ -34,7 +34,67 @@ SavedConversation holder(std::initializer_list<int32_t> ids, std::initializer_li
 }
 }
 
+namespace {
+void test_evictable_bytes() {
+    // All 4,096 assignments of three possible pins to four distinct conversations.
+    for (unsigned pattern = 0; pattern < 4096; ++pattern) {
+        ConversationCache cache(1u << 24, 8);
+        unsigned pins = 0;
+        for (unsigned i = 0; i < 4; ++i) {
+            auto s = image({80 + (int) i, 90, 100, 110});
+            const unsigned mask = (pattern >> (3 * i)) & 7;
+            pins |= mask;
+            for (unsigned p = 0; p < 3; ++p) if (mask & (1u << p)) {
+                ConversationCheckpoint c;
+                c.ids = {1, (int) p + 2}; c.pinned = true; c.gdn.resize(17 + i);
+                s.checkpoints.push_back(std::move(c));
+            }
+            ConversationCheckpoint unique;
+            unique.ids = {80 + (int) i, 90, 100};
+            s.checkpoints.push_back(std::move(unique));
+            check(cache.put(std::move(s)), "accounting fixture parks distinct branches");
+        }
+        ConversationKv retained;
+        retained.k.resize(100);
+        std::vector<ConversationKv> layers;
+        layers.push_back(std::move(retained));
+        cache.retain(std::move(layers), 10);
+        const size_t bytes = cache.bytes(), entries = cache.size(), evictions = cache.evictions();
+        const size_t preview = cache.evictable_bytes(), reuse = cache.retained_bytes();
+        check(cache.bytes() == bytes && cache.size() == entries && cache.evictions() == evictions,
+              "preview is non-mutating");
+        size_t freed = 0;
+        while (cache.evict_oldest()) freed = bytes - cache.bytes();
+        check(preview == freed, "preview exactly matches repeated eviction");
+        check(cache.evictable_bytes() == 0 && cache.retained_bytes() == reuse,
+              "last holders and retained KV are not evictable");
+        for (unsigned p = 0; p < 3; ++p) if (pins & (1u << p))
+            check(cache.best(std::vector<int32_t>{1, (int) p + 2, 999}, {}, true).tokens == 2,
+                  "every initial pinned prefix survives the drain");
+    }
+    for (size_t n : {size_t(0), size_t(1), size_t(3), size_t(64), size_t(65)}) {
+        ConversationCache cache(1u << 24, 128);
+        for (size_t i = 0; i < n; ++i)
+            check(cache.put(holder({1,2,(int)i+10,0}, {1,2})), "park duplicate pin holders across scratch boundary");
+        const size_t before = cache.bytes(), preview = cache.evictable_bytes();
+        const size_t one = n ? before / n : 0;
+        check(preview == (n ? (n - 1) * one : 0), "only redundant holders count, including large caches");
+        while (cache.evict_oldest()) {}
+        check(preview == before - cache.bytes(), "scratch boundary preview matches actual drain");
+    }
+    for (bool images : {false, true}) {
+        ConversationCache cache(1u << 24, 8);
+        auto a = holder({1,2,3,4}, {1,2}), b = holder({1,2,5,6}, {1,2});
+        if (images) { a.checkpoints[0].imgs = {{0,1}}; b.checkpoints[0].imgs = {{0,2}}; }
+        else b.cvec = false;
+        check(cache.put(std::move(a)) && cache.put(std::move(b)), "park different pin identities");
+        check(cache.evictable_bytes() == 0 && !cache.evict_oldest(), "image and steering identity keep sole holders");
+    }
+}
+}
+
 int main() {
+    test_evictable_bytes();
     {
         ConversationBuffer bytes;
         const size_t first = ConversationBuffer::segment_bytes + 17;
