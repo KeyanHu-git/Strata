@@ -335,8 +335,8 @@ public:
     // The parked conversation that has gone unused the longest.  This is make_room()'s loop body, so
     // the parking path can also free RAM one entry at a time on demand (see the physical-RAM admission
     // gate in generate.cpp).  A ConversationBuffer is a list of 16 MiB segments and each segment is its
-    // own allocation, far above glibc's mmap threshold, so dropping an entry returns the whole footprint
-    // to the kernel at once - the next admission check reads it back from /proc/meminfo.
+    // own allocation. Whether freeing it reduces RSS depends on the allocator and platform;
+    // the admission caller must resample available memory after eviction.
     // A pin keeps its shared prefix parked, not every conversation that branched from it (#2255): the oldest entry
     // without a pin goes first; with only pinned ones left, the oldest whose every pinned prefix another entry
     // still holds goes, so every prefix keeps at least one holder.  A client that pins its system prompt on every
@@ -355,6 +355,15 @@ public:
         erase(victim);
         ++evictions_;
         return true;
+    }
+
+    // Bytes released by repeated evict_oldest(), excluding retained K/V, the guarded donor and every pin's final holder.
+    // This is logical snapshot storage, not a guarantee of RSS reduction: admission must still resample memory.
+    // Simulate removals using metadata only; neither the cache nor snapshot payloads are copied/modified.
+    size_t evictable_bytes() const {
+        size_t total = 0;
+        each_evictable([&](size_t i) { total += entries_[i].bytes(); });
+        return total;
     }
 
     // #879: every parked conversation (pinned ones too) and the retained K/V go - after non-finite logits any of them
