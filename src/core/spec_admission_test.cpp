@@ -1,5 +1,6 @@
 // Enumerate proposal and acceptance branches exactly; no Monte Carlo or GPU.
 #include "strata/core/spec_prob.hpp"
+#include "strata/core/gated_proposal.hpp"
 #include "strata/spec/draft_policy.hpp"
 #include <algorithm>
 #include <array>
@@ -20,7 +21,7 @@ Dist judged(const Dist& p, const std::array<float,2>& q, int d) {
     if (a<1) result[spec_verify_row(P,d,Q,(float)((1+a)/2),0.5f).token]+=1-a;
     return result;
 }
-Dist gated(const Dist& p, const std::array<float,2>& q, bool own_draw, float threshold) {
+Dist legacy_raw_q_plain_p(const Dist& p, const std::array<float,2>& q, bool own_draw, float threshold) {
     Dist result{};
     for (int d=0;d<2;++d) {
         const float gate=own_draw?q[d]:std::max(q[0],q[1]);
@@ -32,16 +33,52 @@ Dist gated(const Dist& p, const std::array<float,2>& q, bool own_draw, float thr
 bool equal(const Dist& a,const Dist& b) {
     return std::abs(a[0]-b[0])<1e-12 && std::abs(a[1]-b[1])<1e-12;
 }
+// Enumerate the repaired first-row mixture using the ACTUAL packet builder.
+// No candidate-conditioned renormalization: every draw receives the same root mu.
+Dist proposal_contract(const Dist& p,const std::array<float,2>& q,float threshold,
+                       strata::core::gated::RootChoice root={}) {
+    std::array<int32_t,strata::core::gated::kStride> raw;
+    raw.fill(-1);raw[0]=0;raw[1]=1;
+    std::memcpy(raw.data()+strata::core::gated::kEntries,q.data(),sizeof(q));
+    Dist result{};
+    for (int d=0;d<2;++d) {
+        const int32_t draft=d;const float score=q[d];strata::core::gated::Packet packet;
+        const bool ok=strata::core::gated::make_packet(packet,raw.data(),&draft,&score,1,1,2,2,threshold,false,root);
+        check(ok,"valid gated packet");if(!ok)continue;
+        Dist mu{strata::core::gated::mass_at(packet.mu.data(),0),strata::core::gated::mass_at(packet.mu.data(),1)};
+        double acceptance=0;
+        if (!packet.null_tail) {
+            check(mu[d]>0,"offer has positive mu");
+            acceptance=std::min(1.0,p[d]/mu[d]);
+            result[d]+=q[d]*acceptance;
+        }
+        if (acceptance<1) {
+            Dist residual{std::max(0.0,p[0]-mu[0]),std::max(0.0,p[1]-mu[1])};
+            const double sum=residual[0]+residual[1];check(sum>0,"reachable failure has residual");
+            if(sum>0)for(int y=0;y<2;++y)result[y]+=q[d]*(1-acceptance)*residual[y]/sum;
+        }
+    }
+    return result;
+}
 int main(int argc,char** argv) {
-    const bool approximate=argc>1 && std::strcmp(argv[1],"pick")==0;
-    check(spec_gate_pick()==approximate,"top is default; pick requires explicit opt-in");
-    const Dist p{0.5,0.5}; const std::array<float,2> q{0.875f,0.125f};
-    check(equal(gated(p,q,true,0.5f),Dist{0.5625,0.4375}),"own-draw gate reproduces the exact bias");
-    check(equal(gated(p,q,spec_gate_pick(),0.5f),approximate?Dist{0.5625,0.4375}:p),"configured gate follows its stated law");
-    for(int a=1;a<16;++a) for(int b=1;b<16;++b) {
-        const Dist P{a/16.0,1-a/16.0}; const std::array<float,2> Q{b/16.0f,1-b/16.0f};
-        for(float threshold:{0.0f,0.5f,0.9f,1.1f})
-            check(equal(gated(P,Q,false,threshold),P),"distribution-based admission preserves p");
+    const bool expect_pick=!(argc>1 && std::strcmp(argv[1],"top")==0);
+    check(spec_gate_pick()==expect_pick,"pick is default; only explicit lowercase top selects Top compatibility");
+    const Dist p{0.5,0.5};const std::array<float,2> q{0.875f,0.125f};
+    check(equal(legacy_raw_q_plain_p(p,q,true,0.5f),Dist{0.5625,0.4375}),
+          "LEGACY negative control: own-draw gate with full-q verifier/plain-p failure is biased");
+    check(equal(proposal_contract(p,q,0.5f),p),"new pick mu/NULL mixture preserves p");
+    check(equal(spec_gate_pick()?proposal_contract(p,q,0.5f):legacy_raw_q_plain_p(p,q,false,0.5f),p),
+          "configured repaired pick or Top compatibility preserves p");
+    int top_cases=0,proposal_cases=0;
+    for(int a=1;a<16;++a)for(int b=1;b<16;++b) {
+        const Dist P{a/16.0,1-a/16.0};const std::array<float,2> Q{b/16.0f,1-b/16.0f};
+        for(float threshold:{0.0f,0.5f,0.9f,1.1f}) {
+            check(equal(legacy_raw_q_plain_p(P,Q,false,threshold),P),"Top compatibility distribution law");++top_cases;
+            check(equal(proposal_contract(P,Q,threshold),P),"H-only proposal mixture");++proposal_cases;
+            for(int rescue:{0,1}) {
+                check(equal(proposal_contract(P,Q,threshold,{true,rescue,2}),P),"fixed root UNION on every source branch");++proposal_cases;
+            }
+        }
     }
     // A planner must not learn from draws it may select, including discarded position-keyed lookahead.
     strata::spec::DraftPolicy live(6);
@@ -57,8 +94,8 @@ int main(int argc,char** argv) {
         const auto fixed=request_plan.choose(4,5,24).lookup?p:judged(p,q,d);
         for(int i=0;i<2;++i) { conditional[i]+=q[d]*selected[i];planned[i]+=q[d]*fixed[i]; }
     }
-    check(equal(conditional,Dist{0.4375,0.5625}),"conditioning the source changes the proposal law");
+    check(equal(conditional,Dist{0.4375,0.5625}),"LEGACY negative: D-conditioned source without common first measure changes proposal law");
     check(equal(planned,p),"request plan preserves p despite subsequent timing observations");
-    std::printf("spec_admission_test: 900 exact distribution cases and source/gate controls; %d failures\n",failures);
+    std::printf("spec_admission_test: %d Top compatibility cases, %d actual mu-packet cases, legacy negatives; %d failures\n",top_cases,proposal_cases,failures);
     return failures?1:0;
 }

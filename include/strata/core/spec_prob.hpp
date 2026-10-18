@@ -39,13 +39,13 @@
 
 namespace strata::core {
 
-/// Probabilistic admission uses q's top probability, which is fixed before its token is drawn.
-/// Gating on the drawn token selects a conditional subset of q, so the original q is no longer
-/// the proposal law seen by rejection sampling. Explicit `pick` retains that approximate rule.
+/// The default confidence gate tests the drawn token. gated_proposal.hpp carries its admitted
+/// mass and a NULL outcome to the verifier; a failed gate is still a proposal attempt.
+/// Explicit `top` tests q's largest probability before the draw and uses the normalized-q path.
 inline bool spec_gate_pick() {
     static const bool on = [] {
         const char* e = std::getenv("STRATA_SPEC_PROB_GATE");
-        return e != nullptr && std::strcmp(e, "pick") == 0;
+        return e == nullptr || std::strcmp(e, "top") != 0;
     }();
     return on;
 }
