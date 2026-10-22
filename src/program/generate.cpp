@@ -14009,8 +14009,9 @@ int main(int argc, char** argv) {
                 extra_sources_reset();
                 for (int64_t t : ids) { const int32_t t32 = (int32_t) t; extra_sources_append(&t32, 1); }
             }
-            // This request's draws, including discarded lookahead, must not feed its source planner.
-            const auto source_policy = policy;
+            // This request's source planner: the live policy at its start, then only committed outcomes (no round
+            // times, no rows past the accepted ones: their Philox counters are drawn again by the next rounds).
+            auto source_policy = policy;
             strata::core::MtpDrafter::DraftResult generation;
             strata::core::gated::Packet proposal; // immutable through the synchronous verifier call
             bool first_window = true;
@@ -14716,6 +14717,7 @@ int main(int argc, char** argv) {
                 int sfx_match = 0;
                 if (gated_proposal) {
                     const int room = (int) std::min<int64_t>(S, o.max_context - p);
+                    source_policy.apply_costs(p);   // held round times whose draws are all committed now
                     if (!prepare_gated_window(proposal, generation, sfx, source_policy, o.suffix_draft > 0,
                                                first_window, room, S_mtp, (int) ver.vocab(), (float) req_spec_min_p,
                                                mtp.spec_q(), drafts.data(), dprob.data(), sbuf.data(), sfx_match, err)) {
@@ -14990,6 +14992,7 @@ int main(int argc, char** argv) {
                     draft_offered += T - 1;
                     draft_accepted += a;
                 }
+                const bool initial_round = first_window;   // a single-row window: no proposal to learn from
                 first_window = false;
                 bool eos = false;
                 for (int i = merged ? a : 0; i <= a && produced_n < max_new && !eos; ++i) {   // (merged: row T-1 only)
@@ -15033,6 +15036,12 @@ int main(int argc, char** argv) {
                     std::printf("ERR %s\n", err.c_str());
                     return 1;
                 }
+                if (gated_proposal && !eos && !initial_round)
+                    source_policy.observe_committed(from_sfx, from_sfx ? T : std::min<int>(S_mtp, (int) std::min<int64_t>(S, o.max_context - p)),
+                                                    a, sfx_match);
+                if (gated_proposal && !eos && !initial_round && timed_round)   // after the next draft: its counters too
+                    source_policy.defer_cost(std::max<int64_t>(p + T - 1, p + a + 1 + S_mtp), T,
+                                             std::chrono::duration<double, std::milli>(Clock::now() - round0).count());
                 if (timed_round && !eos && chain_n == 0)
                     policy.observe(from_sfx, T, a, sfx_match,
                                    std::chrono::duration<double, std::milli>(Clock::now() - round0).count());
@@ -16232,7 +16241,7 @@ int main(int argc, char** argv) {
         if (use_mtp && S_mtp < o.spec) mtp.set_max_drafts(S_mtp - 1);
         strata::spec::SuffixDrafter sfx(std::max(1, o.suffix_draft), 64, (size_t) o.max_context + 4096);
         strata::spec::DraftPolicy policy(o.spec);   // MTP or lookup window (see draft_policy.hpp)
-        const auto source_policy = policy;   // fixed for this generation
+        auto source_policy = policy;   // this generation's: committed outcomes only (observe_committed)
         std::vector<int32_t> sbuf((size_t) o.spec, 0);
         int64_t sfx_windows = 0, sfx_drafts = 0, sfx_ok = 0;
         int64_t chain_windows = 0, chain_drafts = 0, chain_ok = 0;   // --lookup-chain's own counts
@@ -16257,6 +16266,7 @@ int main(int argc, char** argv) {
             bool from_sfx = false;
             int sfx_match = 0;
             if (gated_proposal) {
+                source_policy.apply_costs(p);   // held round times whose draws are all committed now
                 if (!prepare_gated_window(proposal, generation, sfx, source_policy, o.suffix_draft > 0,
                                            first_window, room, S_mtp, (int) ver.vocab(), (float) o.spec_min_p,
                                            mtp.spec_q(), drafts.data(), dprob.data(), sbuf.data(), sfx_match, err)) {
@@ -16357,6 +16367,7 @@ int main(int argc, char** argv) {
             }
             int a = 0;
             while (a < T - 1 && window[(size_t) a + 1] == outv[(size_t) a]) ++a;
+            const bool initial_round = first_window;   // a single-row window: no proposal to learn from
             if (first_window) {
                 first_window = false;
                 ttft_ms = std::chrono::duration<double, std::milli>(Clock::now() - t_start).count();
@@ -16416,6 +16427,9 @@ int main(int argc, char** argv) {
             p += a + 1;
             const double round_ms = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
             total_ms += round_ms;
+            if (gated_proposal && !initial_round) source_policy.observe_committed(from_sfx, from_sfx ? T : std::min(S_mtp, room), a, sfx_match);
+            if (gated_proposal && !initial_round && timed_round)   // p has advanced: the window was p - a - 1 ..
+                source_policy.defer_cost(std::max<int64_t>(p - a - 2 + T, p + S_mtp), T, round_ms);
             if (timed_round && chain_n == 0) policy.observe(from_sfx, T, a, sfx_match, round_ms);
             else if (timed_round) policy.observe_chain(T_mtp, chain_n, a, cm, round_ms);
             if (rounds % 64 == 0)
