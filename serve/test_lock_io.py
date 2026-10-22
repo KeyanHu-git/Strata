@@ -69,7 +69,10 @@ class PausedConsoleDoesNotHoldStatusLock(unittest.TestCase):
                 # another status_lock user (_progress, /v1/status, the next request) must get the lock now
                 got = svc.status_lock.acquire(timeout=2)
                 if got:
-                    svc.status_lock.release()
+                    try:
+                        self.assertFalse(svc.terminal_requests, "finished request remains registered during console I/O")
+                    finally:
+                        svc.status_lock.release()
                 got_turn = svc.fifo.acquire(timeout=2)
                 if got_turn:
                     svc.fifo.release()
