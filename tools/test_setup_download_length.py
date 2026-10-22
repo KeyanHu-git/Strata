@@ -43,6 +43,14 @@ class Host(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        # Some mirrors accept an open-ended resume but reject the bounded probe.
+        # Exercise the serial fallback after range_total() cannot establish a size.
+        if self.headers.get("Range") == "bytes=0-0":
+            self.send_response(405)
+            self.send_header("Content-Length", "0")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            return
         start = 0
         m = None if self.mode == "norange" else re.match(r"bytes=(\d+)-", self.headers.get("Range", ""))
         if m:
@@ -195,7 +203,7 @@ class DownloadLength(unittest.TestCase):
                 mock.patch.object(setup, "verify_sha256", wraps=setup.verify_sha256) as verify:
             setup.download(url, self.dst)
         meta.assert_called_once_with("repo", "file")
-        verify.assert_called_once_with(self.dst, len(DATA), digest)
+        verify.assert_called_once_with(self.dst, len(DATA), digest, repair=None)
         self.assertEqual(self.gets, [0, 300_000])
         self.assertEqual(self.dst.read_bytes(), DATA)
         self.assertIn(digest, self.dst.with_name(self.dst.name + ".done").read_text())
