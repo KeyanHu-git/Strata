@@ -206,7 +206,7 @@ def ms_meta(repo: str, path: str):
                                         timeout=60) as r:
                 files = json.loads(r.read())["Data"]["Files"]
             _ms_files[repo] = {f["Path"]: (int(f.get("Size") or 0), (f.get("Sha256") or "").lower()) for f in files}
-        except (OSError, http.client.HTTPException, ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError):
             return None
     return _ms_files[repo].get(path)
 
@@ -2562,97 +2562,51 @@ def repair_download(url: str, path: Path, total: int, label: str, conns: int):
     return len(stats["pieces"]), st.n
 
 
-def answer_total(r, start: int) -> int:
-    """Validate a resumed response and return its whole-file length, or 0 if unknown."""
-    length = r.headers.get("Content-Length", "")
-    if r.status == 206:
-        match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+|\*)", r.headers.get("Content-Range", ""))
-        if not match:
-            raise OSError("partial response has no valid Content-Range")
-        first, last = int(match[1]), int(match[2])
-        total = int(match[3]) if match[3] != "*" else 0
-        if first != start or last < first or (total and last >= total):
-            raise OSError("partial response does not match the requested range")
-        if length.isdigit() and int(length) != last - first + 1:
-            raise OSError("Content-Length disagrees with Content-Range")
-        return total
-    if r.status != 200:
-        raise OSError(f"unexpected download status {r.status}")
-    return int(length) if length.isdigit() else 0
-
-
-def download_single(url: str, part: Path, total: int, label: str) -> int:
-    """Complete one stream, returning its verified whole-file length (zero for a framed empty/unknown-size body).
-    HEAD and the one-byte probe may both omit the length; each GET can still establish it before bytes are appended.
-    """
+def download_single(url: str, part: Path, total: int, label: str):
+    """One stream with a Range resume from the size of `part` (the way every download worked before parallel pieces).
+    A resumed answer is used only when it is a 206 that starts at the byte asked for; anything else starts the file over."""
     _single_ready(part)
     for attempt in range(30):
         have = part.stat().st_size if part.exists() else 0
-        if total and have >= total:
-            break
+        if total and have >= total:                    # stopped after the last byte, before the rename: nothing to
+            break                                      # ask for (a range past the end is a 416, retried 30 times)
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "strata-setup", "Range": f"bytes={have}-"})
             with _urlopen(req, timeout=60) as r:
-                response_total = answer_total(r, 0 if r.status == 200 else have)
-                if total and response_total and total != response_total:
-                    raise OSError("response length changed while downloading")
-                total = total or response_total
-                if r.status == 200:
-                    have = 0                            # a whole response replaces the partial after validation
+                if have:
+                    m = _CONTENT_RANGE.match(r.headers.get("Content-Range") or "")
+                    if r.status != 206 or not m or int(m.group(1)) != have or (total and int(m.group(3)) != total):
+                        if r.status != 200:              # another range: its bytes are not the file's; ask again from the start
+                            part.unlink(missing_ok=True)
+                            raise OSError(f"the server answered another range than bytes {have}- (HTTP {r.status})")
+                        have = 0                         # the server ignored the range and sent the whole file: start over
+                elif r.status not in (200, 206):
+                    raise OSError(f"HTTP {r.status}")
                 with open(part, "ab" if have else "wb") as f:
                     last = 0.0
                     while True:
-                        interrupted = None
-                        try:
-                            b = r.read(8 << 20)
-                        except http.client.IncompleteRead as e:
-                            b, interrupted = e.partial, e
+                        b = r.read(8 << 20)
+                        if not b:
+                            break
                         if total and have + len(b) > total:
                             raise OSError("the server sent more bytes than the file has")
                         f.write(b)
                         have += len(b)
-                        if interrupted is not None:
-                            raise OSError("the connection closed before the final chunk") from interrupted
-                        if not b:
-                            break
                         if time.time() - last > 2:
                             last = time.time()
-                            size = f"{have / 1e9:6.2f} / {total / 1e9:.2f} GB ({100 * have / total:.0f}%)" if total else f"{have / 1e6:7.1f} MB"
+                            size = f"{have / 1e9:6.2f} / {total / 1e9:.2f} GB ({100 * have / total:.0f}%)" if total                                 else f"{have / 1e6:7.1f} MB"
                             print(f"\r  {label}: {size}   ", end="", flush=True)
                     f.flush()
                     os.fsync(f.fileno())
-                whole = r.status == 200 and (bool(getattr(r, "chunked", False))
-                                             or r.headers.get("Content-Length") == "0")
             print()
-            if total and have == total:
-                return total
-            if not total:
-                if whole:
-                    return 0
-                fail(f"cannot confirm the complete length of {part.name}",
-                     "the .part file is kept; use a source that provides a file length or a complete chunked response")
-        except urllib.error.HTTPError as e:
-            with e:
-                match = re.fullmatch(r"bytes \*/(\d+)", e.headers.get("Content-Range", ""))
-                if e.code == 416 and match:
-                    size = int(match[1])
-                    if have == size and (not total or total == size):
-                        part.touch(exist_ok=True)
-                        return size
-                    fail(f"cannot resume {part.name}: {have:,} local bytes, server reports {size:,}",
-                         "the .part file is kept; check that the URL still refers to the same file")
-            print()
-            warn(f"download interrupted ({e}); retrying in 10 s ...")
-            time.sleep(10)
+            if not total or have >= total:
+                break
         except (OSError, http.client.HTTPException) as e:
             print()
+            if part.exists() and total and part.stat().st_size > total:
+                part.unlink(missing_ok=True)             # more than the file has can only be wrong bytes
             warn(f"download interrupted ({e}); retrying in 10 s ...")
             time.sleep(10)
-    have = part.stat().st_size if part.exists() else 0
-    if total and have == total:
-        return total
-    fail(f"could not finish downloading {part.name}: {have:,} bytes on disk, expected {total:,}",
-         "check your internet connection and run it again (the download resumes where it stopped)")
 
 
 def range_total(url: str) -> int:
@@ -2721,8 +2675,8 @@ def download(url, dst: Path, what=None):
     if not total:
         total = range_total(url)
     meta = ms_meta(*ms) if ms is not None else None
-    if not total:
-        total = pin[0] if pin else (meta[0] if meta is not None else 0)
+    if not total:                                  # published size also governs partial-file completion
+        total = pin[0] if pin else (meta[0] if meta else 0)
     if pin and total and total != pin[0]:              # not the pinned file: stop before the download, not after
         fail(f"{what or dst.name} is {total:,} bytes on {url.split('/')[2]}, not the pinned {pin[0]:,}",
              "update Strata (the file there has changed since this version pinned it)")
@@ -2739,7 +2693,7 @@ def download(url, dst: Path, what=None):
         return
     if not (total >= DL_MIN_PARALLEL and conns > 1 and parallel_download(url, part, total, label, conns, dst.name)):
         _claim_part(part, url)
-        total = download_single(url, part, total, label)
+        download_single(url, part, total, label)
     if total and part.stat().st_size != total:
         fail(f"could not finish downloading {dst.name}: {part.stat().st_size:,} bytes on disk, the server says {total:,}",
              "check your internet connection and run it again (the download resumes where it stopped)")
