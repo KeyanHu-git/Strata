@@ -136,8 +136,8 @@ class GGUFFile:
                                            GGML_TYPES.get(type_id, f"type{type_id}"), offset))
         align = self.metadata.get("general.alignment")
         if align is not None:
-            if type(align) is not int or align <= 0 or align & (align - 1):
-                raise ValueError("general.alignment must be a positive power of two")
+            if type(align) is not int or align <= 0 or align % 8:
+                raise ValueError("general.alignment must be a positive multiple of 8")
             self.alignment = align
         pos = self._pos
         self._data_start = (pos + self.alignment - 1) // self.alignment * self.alignment
