@@ -5394,10 +5394,12 @@ class Service:
                 self._terminal_event_locked(request_id, event, finish)
             # The state snapshot and engine turn are complete before console I/O. A paused
             # console may hold this writer, but cannot retain the next request's turn.
-            if emb:
-                Path(emb).unlink(missing_ok=True)
-            for line in said:
-                print(line, flush=True)
+            try:
+                if emb:
+                    Path(emb).unlink(missing_ok=True)
+            finally:
+                for line in said:
+                    print(line, flush=True)
         for ev in cut(parser.finish(finish)):
             yield "event", ev
         if parser.rescued or parser.refused:
