@@ -64,3 +64,28 @@ c++ -std=c++20 -Wall -Wextra -Werror -fsanitize=address,undefined -Iinclude \
 The cache tests cover distinct and shared pins, image/steering identity, byte and slot pressure, borrowed donors, and preview-versus-actual eviction. The new session-save cases inject low-memory readings and prohibit allocation during reclamation. They verify that redundant holders are reclaimed before the active chain, reclamation stops when enough memory is available, the donor stays valid, and the selected checkpoint retains its content and storage.
 
 On the original header the new session case fails at `SAVE releases redundant pin holders one at a time`. On the patch it passes under Apple Clang with ASan/UBSan, Windows HIP Clang, and Intel `icpx`. Logs: [original](session-save-original.txt), [patched](session-save-final.txt), [cache policy](cache-final.txt). Backend build receipts are recorded separately from model execution.
+
+## Main refresh, 2026-10-26
+
+Merged main `4b9e05a2` (0.2.6 / engine 0.1.51). The conflict was confined to
+`docs/DETAILS.md`, which main reorganized into shorter sections and option tables.
+The resolved text retains that structure and documents the shared-prefix ownership
+rule for parking and session-save reclamation.
+
+The two production headers, both regression-test sources, and `conversation_file.cpp`
+are byte-identical to PR revision `9a08edca`. Main still protects every pinned holder;
+its new automatic conversation-cache sizing changes the budget selection, not the
+ownership or eviction rule.
+
+Re-ran the two C++20 commands above on the merged tree with Apple Clang,
+`-Wall -Wextra -Werror -fsanitize=address,undefined`:
+
+- `conversation_cache_test`: 45,153 checks passed.
+- `session_save_reclaim_test`: 161 checks passed.
+- The same session-save regression compiled against main's unmodified cache header
+  exits 1 at `SAVE releases redundant pin holders one at a time`.
+- The PR diff against main passes `git diff --check`.
+
+The GPU model replay and four-backend build results above remain measurements of
+0.2.2. They were not repeated for this documentation-conflict refresh; the checks
+listed here establish current cache-policy behavior, not a new 0.2.6 model run.
