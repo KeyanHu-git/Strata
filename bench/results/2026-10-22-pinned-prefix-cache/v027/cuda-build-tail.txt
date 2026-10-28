@@ -1,0 +1,13 @@
+<workspace>/source/src/program/generate.cpp:13294:30: warning: unused variable 'w' [-Wunused-variable]
+13294 |                 const double w = (double) bt_windows, wall = std::chrono::duration<double, std::milli>(Clock::now() - bt_start).count();
+      |                              ^
+[174/174] Linking CXX executable strata
+Test project <workspace>/build-cuda
+    Start 1: conversation_cache_test
+1/2 Test #1: conversation_cache_test ..........   Passed    0.53 sec
+    Start 5: session_save_reclaim_test
+2/2 Test #5: session_save_reclaim_test ........   Passed    0.00 sec
+
+100% tests passed out of 2
+
+Total Test time (real) =   0.54 sec

@@ -89,3 +89,7 @@ Re-ran the two C++20 commands above on the merged tree with Apple Clang,
 The GPU model replay and four-backend build results above remain measurements of
 0.2.2. They were not repeated for this documentation-conflict refresh; the checks
 listed here establish current cache-policy behavior, not a new 0.2.6 model run.
+
+## v0.2.7 validation, 2026-10-28
+
+[Current release replay, async-copy ownership and sanitizer results](v027/README.md).
