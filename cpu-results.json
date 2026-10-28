@@ -1,0 +1,12 @@
+{
+  "source": "ce957e1457a4d82329fe40ac8dfb279fb21a008d",
+  "sanitizers": [
+    "address",
+    "undefined"
+  ],
+  "cache_checks": 45257,
+  "file_checks": 198,
+  "session_save_checks": 161,
+  "deleted_copy_probes": 8,
+  "note": "Production and CPU test bytes unchanged from locally tested 6ebe05c2; ce957 updates CUDA/SYCL snapshot test fixtures only."
+}

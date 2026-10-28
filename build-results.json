@@ -1,0 +1,24 @@
+{
+  "source": "ce957e1457a4d82329fe40ac8dfb279fb21a008d",
+  "CUDA": {
+    "full_engine": "passed",
+    "snapshot_test_build": "passed",
+    "ctest": "5/5 passed",
+    "device_execution": false
+  },
+  "SYCL": {
+    "full_engine": "passed",
+    "snapshot_test_build": "passed",
+    "device_execution": false
+  },
+  "HIP": {
+    "full_engine": "passed",
+    "snapshot_configurations": 4,
+    "model_arms": 3,
+    "async_dma_enabled": false
+  },
+  "Metal": {
+    "full_engine": "passed",
+    "device_execution": false
+  }
+}

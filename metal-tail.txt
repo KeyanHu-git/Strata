@@ -1,0 +1,30 @@
+      |             ^
+/Users/keyanhu/Desktop/pr/Strata/2255-对话缓存淘汰/update-20261022/source/include/strata/core/expert_source.hpp:203:21: note: overridden virtual function is here
+  203 |     virtual int64_t reads() const { return 0; }
+      |                     ^
+1 warning generated.
+[4/11] Building CXX object 'CMakeFiles/strata_metal_host.dir/Users/keyanhu/Desktop/pr/Strata/2255-对话缓存淘汰/update-20261022/source/src/core/conversation_file.cpp.o'
+[5/11] Linking CXX static library libstrata_metal_host.a
+[6/11] Building CXX object CMakeFiles/strata_metal_kernels.dir/src/engine/stubs_0145.cpp.o
+In file included from /Users/keyanhu/Desktop/pr/Strata/2255-对话缓存淘汰/update-20261022/source/metal/src/engine/stubs_0145.cpp:70:
+In file included from /Users/keyanhu/Desktop/pr/Strata/2255-对话缓存淘汰/update-20261022/source/include/strata/prefill/prefill.hpp:14:
+/Users/keyanhu/Desktop/pr/Strata/2255-对话缓存淘汰/update-20261022/source/include/strata/core/expert_source.hpp:1272:13: warning: 'reads' overrides a member function but is not marked 'override' [-Winconsistent-missing-override]
+ 1272 |     int64_t reads() const { return reads_.load(std::memory_order_relaxed); }
+      |             ^
+/Users/keyanhu/Desktop/pr/Strata/2255-对话缓存淘汰/update-20261022/source/include/strata/core/expert_source.hpp:203:21: note: overridden virtual function is here
+  203 |     virtual int64_t reads() const { return 0; }
+      |                     ^
+1 warning generated.
+[7/11] Building CXX object CMakeFiles/strata_metal_kernels.dir/src/engine/window.cpp.o
+[8/11] Linking CXX static library libstrata_metal_kernels.a
+[9/11] Building CXX object 'CMakeFiles/strata.dir/Users/keyanhu/Desktop/pr/Strata/2255-对话缓存淘汰/update-20261022/source/src/program/generate.cpp.o'
+In file included from /Users/keyanhu/Desktop/pr/Strata/2255-对话缓存淘汰/update-20261022/source/src/program/generate.cpp:36:
+/Users/keyanhu/Desktop/pr/Strata/2255-对话缓存淘汰/update-20261022/source/include/strata/core/expert_source.hpp:1272:13: warning: 'reads' overrides a member function but is not marked 'override' [-Winconsistent-missing-override]
+ 1272 |     int64_t reads() const { return reads_.load(std::memory_order_relaxed); }
+      |             ^
+/Users/keyanhu/Desktop/pr/Strata/2255-对话缓存淘汰/update-20261022/source/include/strata/core/expert_source.hpp:203:21: note: overridden virtual function is here
+  203 |     virtual int64_t reads() const { return 0; }
+      |                     ^
+1 warning generated.
+[10/11] Linking CXX executable strata
+ld: warning: ignoring duplicate libraries: 'libstrata_metal_host.a', 'libstrata_metal_kernels.a'

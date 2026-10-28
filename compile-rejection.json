@@ -1,0 +1,10 @@
+{
+  "ConversationKv construct": "rejected: deleted copy",
+  "ConversationKv assign": "rejected: deleted copy",
+  "SavedConversation construct": "rejected: deleted copy",
+  "SavedConversation assign": "rejected: deleted copy",
+  "ConversationKvReuse construct": "rejected: deleted copy",
+  "ConversationKvReuse assign": "rejected: deleted copy",
+  "ConversationCache construct": "rejected: deleted copy",
+  "ConversationCache assign": "rejected: deleted copy"
+}

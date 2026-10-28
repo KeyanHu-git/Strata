@@ -1,0 +1,24 @@
+/home/hky/strata-2443-v027-20261028/source/src/program/generate.cpp: In lambda function:
+/home/hky/strata-2443-v027-20261028/source/src/program/generate.cpp:7063:29: warning: unused variable 'lay' [-Wunused-variable]
+ 7063 |                 const auto& lay = strata::kernels::cpu::expert_layout();
+      |                             ^~~
+/home/hky/strata-2443-v027-20261028/source/src/program/generate.cpp: In lambda function:
+/home/hky/strata-2443-v027-20261028/source/src/program/generate.cpp:13294:30: warning: unused variable 'w' [-Wunused-variable]
+13294 |                 const double w = (double) bt_windows, wall = std::chrono::duration<double, std::milli>(Clock::now() - bt_start).count();
+      |                              ^
+[32/32] Linking CXX executable strata
+Test project /home/hky/strata-2443-v027-20261028/build-cuda
+    Start  1: conversation_cache_test
+1/5 Test  #1: conversation_cache_test ..........   Passed    0.41 sec
+    Start  4: conversation_file_test
+2/5 Test  #4: conversation_file_test ...........   Passed    3.05 sec
+    Start  5: session_save_reclaim_test
+3/5 Test  #5: session_save_reclaim_test ........   Passed    0.01 sec
+    Start 44: conversation_validation_test
+4/5 Test #44: conversation_validation_test .....   Passed    0.08 sec
+    Start 45: conversation_transfer_test
+5/5 Test #45: conversation_transfer_test .......   Passed    0.22 sec
+
+100% tests passed out of 5
+
+Total Test time (real) =   3.77 sec

@@ -1,0 +1,12 @@
+/home/hky/strata-2443-v027-20261028/source/sycl/include/dpct/graph.hpp:162:13: warning: unused function 'add_dependencies' [-Wunused-function]
+  162 | static void add_dependencies(dpct::experimental::command_graph_ptr graph,
+      |             ^~~~~~~~~~~~~~~~
+/home/hky/strata-2443-v027-20261028/source/sycl/include/dpct/graph.hpp:176:13: warning: unused function 'get_nodes' [-Wunused-function]
+  176 | static void get_nodes(dpct::experimental::command_graph_ptr graph,
+      |             ^~~~~~~~~
+/home/hky/strata-2443-v027-20261028/source/sycl/include/dpct/graph.hpp:187:13: warning: unused function 'get_root_nodes' [-Wunused-function]
+  187 | static void get_root_nodes(dpct::experimental::command_graph_ptr graph,
+      |             ^~~~~~~~~~~~~~
+34 warnings generated.
+[2/3] Linking CXX executable strata
+[3/3] Linking CXX executable conversation_snapshot_test

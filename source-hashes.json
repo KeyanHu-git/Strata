@@ -1,0 +1,13 @@
+{
+  "commit": "ce957e1457a4d82329fe40ac8dfb279fb21a008d",
+  "files": {
+    "include/strata/core/conversation_cache.hpp": "c483bf2ab5a83020ae04cce35f57a59f4af70059464479a1a88d77218a76fcf5",
+    "include/strata/core/session_save_reclaim.hpp": "0bc9daddd7e530d5295a2e574ad30502f4b91a406fab8ed8ed67c976f27f9934",
+    "src/core/conversation_cache_test.cpp": "d99233a569e69a6ddd9eb3db5dd2a372b77a3e3b74b0ba50e10bdcadd41b4ee6",
+    "src/core/conversation_file_test.cpp": "3437439eb296db06be246c684accd27406cdd2afa4d54c86d768abe5a3e615b8",
+    "src/core/conversation_snapshot_test.cpp": "b5b9d101ed49e115e498655496145e8c2e190c1bbf219a3de799ae20d78b4b5d",
+    "src/core/conversation_validation_test.cpp": "eae162b2e6557ff4fe15d2e088f93d0fd5645eb3afcfb66f8fe366d7df4ebae6",
+    "src/core/session_save_reclaim_test.cpp": "2354acc5d5508e3a77c6095edbf877615518cc52fc3d1c8eed5f8d82a11fa3c6",
+    "sycl/src/core/conversation_snapshot_test.cpp": "fec41d02f15590972646ff41649055a9b97cb0a30363b51231fd0f6544c8af61"
+  }
+}
