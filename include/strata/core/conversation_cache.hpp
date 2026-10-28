@@ -70,6 +70,30 @@ struct ConversationKv {
     // are retained for the next park (ConversationCache::retain), and go in any order.  Last member: it goes before
     // any buffer.
     std::shared_ptr<void> pending;
+    ConversationKv() = default;
+    // Copying requires completed payload writes; moving transfers in-flight ownership.
+    ConversationKv(const ConversationKv&) = default;
+    ConversationKv(ConversationKv&&) noexcept = default;
+    // Replace the complete owner; the old copy tokens are destroyed before its buffers.
+    ConversationKv& operator=(ConversationKv replacement) noexcept {
+        using std::swap;
+        swap(format, replacement.format);
+        swap(cells, replacement.cells);
+        swap(heads, replacement.heads);
+        swap(head_dim, replacement.head_dim);
+        swap(page_size, replacement.page_size);
+        swap(pooled_rows, replacement.pooled_rows);
+        swap(idx_dim, replacement.idx_dim);
+        swap(k, replacement.k);
+        swap(v, replacement.v);
+        swap(k_scale, replacement.k_scale);
+        swap(v_scale, replacement.v_scale);
+        swap(pooled, replacement.pooled);
+        swap(dev_tag, replacement.dev_tag);
+        swap(pending, replacement.pending);
+        return *this;
+    }
+
     size_t bytes() const {
         return k.bytes() + v.bytes() + k_scale.bytes() + v_scale.bytes() + pooled.bytes();
     }
@@ -183,10 +207,30 @@ struct SavedConversation {
     // with a layer split, the later stages' own images, one per stage, in stage order
     std::vector<SavedConversation> stage_images;
     // STRATA_PARK_ASYNC: set while a background copy fills this image's K/V; its deleter waits for that copy, and as
-    // one of the last members it runs before any buffer is freed (whichever copy of the image goes last)
+    // one of the last members it runs before any buffer is freed
     std::shared_ptr<void> pending;
     // STRATA_CKPT_ASYNC: the same for the background copy that fills `live.gdn` (the park's running state)
     std::shared_ptr<void> live_pending;
+
+    SavedConversation() = default;
+    // Copying requires completed writes in this image and its layers/stages.
+    SavedConversation(const SavedConversation&) = default;
+    SavedConversation(SavedConversation&&) noexcept = default;
+    // Replace the complete owner; the old copy tokens are destroyed before its buffers.
+    SavedConversation& operator=(SavedConversation replacement) noexcept {
+        using std::swap;
+        swap(geometry, replacement.geometry);
+        swap(layer_lo, replacement.layer_lo);
+        swap(layer_hi, replacement.layer_hi);
+        swap(live, replacement.live);
+        swap(checkpoints, replacement.checkpoints);
+        swap(kv, replacement.kv);
+        swap(cvec, replacement.cvec);
+        swap(stage_images, replacement.stage_images);
+        swap(pending, replacement.pending);
+        swap(live_pending, replacement.live_pending);
+        return *this;
+    }
 
     /// Holds a pinned shared prefix (see ConversationCheckpoint::pinned): the parked-conversation budget keeps it.
     bool pinned() const {
@@ -516,9 +560,6 @@ public:
 
 private:
     void erase(size_t index) {
-        // Keep the victim intact while deque::erase shifts its neighbours. Move-assignment would
-        // free its buffers before replacing the pending-copy tokens; destruction joins them first.
-        SavedConversation retired = std::move(entries_[index]);
         entries_.erase(entries_.begin() + (std::ptrdiff_t) index);
         serials_.erase(serials_.begin() + (std::ptrdiff_t) index);
     }

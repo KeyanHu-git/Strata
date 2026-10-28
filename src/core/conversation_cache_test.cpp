@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
+#include <type_traits>
 
 using namespace strata::core;
 
@@ -35,6 +36,70 @@ SavedConversation holder(std::initializer_list<int32_t> ids, std::initializer_li
 }
 
 namespace {
+void test_owner_assignment() {
+    static_assert(std::is_nothrow_move_constructible_v<SavedConversation>);
+    static_assert(std::is_nothrow_move_assignable_v<SavedConversation>);
+    static_assert(std::is_nothrow_move_assignable_v<ConversationKv>);
+    int joined = 0;
+    auto token = [&](uint8_t* p) {
+        return std::shared_ptr<void>(p, [&](void* q) {
+            check(*static_cast<uint8_t*>(q) == 7, "assignment joins before releasing the old allocation");
+            ++joined;
+        });
+    };
+    auto pending_image = [&] {
+        SavedConversation s;
+        s.live.gdn.assign(64, 7);
+        s.live_pending = token(s.live.gdn.data());
+        return s;
+    };
+    {
+        auto a = pending_image(), b = pending_image();
+        auto* incoming = b.live.gdn.data();
+        a = std::move(b);
+        check(joined == 1 && a.live.gdn.data() == incoming, "move joins the old image and transfers the new allocation");
+        auto& self = a;
+        a = std::move(self);
+        check(joined == 1 && a.live.gdn.data() == incoming, "self-move preserves pending ownership");
+    }
+    check(joined == 2, "moved image joins when its owner ends");
+    {
+        auto a = pending_image();
+        SavedConversation complete;
+        complete.live.gdn.assign(64, 9);
+        a = complete;
+        check(joined == 3 && a.live.gdn[0] == 9 && a.live.gdn.data() != complete.live.gdn.data(),
+              "copy from a completed image retires the destination and owns independent storage");
+    }
+    {
+        ConversationKv a, b;
+        a.k.resize(64, 7);
+        a.k.visit(0, 1, [&](uint8_t* p, size_t, size_t) { a.pending = token(p); return true; });
+        b.k.resize(64, 9); b.dev_tag = 42;
+        a = std::move(b);
+        uint8_t x = 0;
+        a.k.read(&x, 0, 1);
+        check(joined == 4 && a.dev_tag == 42 && x == 9, "layer replacement joins old storage and transfers metadata");
+    }
+    for (size_t victim : {size_t(1), size_t(3)}) {
+        std::deque<SavedConversation> entries;
+        for (int i = 0; i < 5; ++i) entries.push_back(pending_image());
+        const int before = joined;
+        entries.erase(entries.begin() + (std::ptrdiff_t) victim);
+        check(joined == before + 1, "either deque shift direction retires only the victim");
+        for (const auto& s : entries)
+            check(s.live.gdn[0] == 7 && s.live_pending, "shifted neighbours retain pending storage");
+    }
+    check(joined == 14, "each shifted image joins exactly once");
+    {
+        auto a = pending_image(), b = pending_image();
+        a.stage_images.push_back(pending_image());
+        a = std::move(b);
+        check(joined == 16 && a.stage_images.empty(), "replacement retires the old image and its stage owners");
+    }
+    check(joined == 17, "replacement stage ownership leaves no pending joins");
+}
+
 void test_evictable_bytes() {
     // All 4,096 assignments of three possible pins to four distinct conversations.
     for (unsigned pattern = 0; pattern < 4096; ++pattern) {
@@ -94,6 +159,7 @@ void test_evictable_bytes() {
 }
 
 int main() {
+    test_owner_assignment();
     test_evictable_bytes();
     {
         ConversationBuffer bytes;
