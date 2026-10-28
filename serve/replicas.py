@@ -29,6 +29,8 @@ import os
 import threading
 import time
 
+from serve.console import console_print
+
 BLOCK = 64                          # tokens per hashed block of a prompt
 LOAD_TOKENS = 3000                  # the cost of one request already running on a replica, in prompt tokens
 INDEX_MAX = 262144                  # block hashes kept (about 17M tokens of prompts)
@@ -115,7 +117,7 @@ def cpu_sets(n: int, enabled: bool = True):
         from serve.cpu_affinity import partition_cpu_sets
         return partition_cpu_sets(n, set(os.sched_getaffinity(0)))
     except (ValueError, OSError, ImportError) as e:
-        print(f"[strata] replicas: no separate CPU cores ({e})", flush=True)
+        console_print(f"[strata] replicas: no separate CPU cores ({e})", flush=True)
         return None
 
 
@@ -322,7 +324,7 @@ class ReplicaEngine:
         if errors and not self.alive():
             raise next(iter(errors.values()))
         for k, e in errors.items():
-            print(f"[strata] replica {k} did not start ({e}); the others serve", flush=True)
+            console_print(f"[strata] replica {k} did not start ({e}); the others serve", flush=True)
 
     def unload(self):
         for e in self.engines:
@@ -370,12 +372,12 @@ class ReplicaEngine:
 
             def run(k=k):
                 try:
-                    print(f"[strata] replica {k} had stopped; starting it again", flush=True)
+                    console_print(f"[strata] replica {k} had stopped; starting it again", flush=True)
                     self.engines[k].restart()
                     self.router.forget(k)
-                    print(f"[strata] replica {k} is running again", flush=True)
+                    console_print(f"[strata] replica {k} is running again", flush=True)
                 except BaseException as x:       # noqa: BLE001
-                    print(f"[strata] replica {k} did not start again: {x}", flush=True)
+                    console_print(f"[strata] replica {k} did not start again: {x}", flush=True)
                 finally:
                     self.healing[k] = False
             threading.Thread(target=run, daemon=True).start()

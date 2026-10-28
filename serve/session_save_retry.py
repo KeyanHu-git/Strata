@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 import time
 
+from serve.console import console_print
+
 SETTLE_SECONDS = 30.0
 MAX_RETRIES = 3
 POLL_SECONDS = 0.5
@@ -56,7 +58,7 @@ def session_file(service, action, path, refused_type):
             except OSError:
                 return False
 
-        print('[strata] SAVE waiting for RAM after cache reclaim: '
+        console_print('[strata] SAVE waiting for RAM after cache reclaim: '
               f'need={required_mib(error)} MiB, limit={SETTLE_SECONDS:g}s; floor unchanged', flush=True)
         for attempt in range(MAX_RETRIES):
             while True:

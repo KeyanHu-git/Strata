@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+
 import contextlib
 import io
 import json
@@ -21,6 +22,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from serve.test_console_support import capture_console
 from serve.frontend import ChatTemplate, literal_tags, mark_think_literals, unmark_think_literals  # noqa: E402
 from serve.server import (ANSWER_RESERVE_MIN, CTX_SLACK, ByteTokenizer, EngineDied, EngineNonFinite, GpuBusy, MockEngine,  # noqa: E402
                           PP_DONE_TAIL, Service,
@@ -194,7 +196,7 @@ class MaxTokens(unittest.TestCase):
         for api in ("openai", "anthropic", "responses"):
             with self.subTest(api=api):
                 out = io.StringIO()
-                with contextlib.redirect_stdout(out):
+                with capture_console(out):
                     s, b, pt, _ = self.call_any(api, max_tokens=CTX)
                 self.assertEqual(s, 200, b)
                 room = CTX - CTX_SLACK - pt
@@ -243,7 +245,7 @@ class MaxTokens(unittest.TestCase):
             for api in ("openai", "anthropic"):
                 with self.subTest(api=api):
                     out = io.StringIO()
-                    with contextlib.redirect_stdout(out):
+                    with capture_console(out):
                         _, _, pt, _ = self.call(api, max_tokens=-1)
                     self.assertIn(f"max_new={CTX - CTX_SLACK - pt} ", out.getvalue())
         finally:
@@ -910,7 +912,7 @@ class EffortAtTheEnd(unittest.TestCase):
             new.write_bytes(b"...  --tail-role-token ID --serve: ...")
             old.write_bytes(b"... --turn-token ID ...")
             out = io.StringIO()
-            with contextlib.redirect_stdout(out):
+            with capture_console(out):
                 self.assertIsNone(effort_end_args({}, str(new), Tok()))
                 self.assertIsNone(effort_end_args({"effort_position": "start"}, str(new), Tok()))
                 self.assertEqual(effort_end_args({"effort_position": "end"}, str(new), Tok()),
@@ -1246,7 +1248,7 @@ class ToolCallRecoverySwitch(unittest.TestCase):
         script = "</think>\n\n<function=write>\n" + ToolCallRecovery.PARAMS
         svc = Service(MockEngine(tok, script, max_context=CTX), tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
         svc.tool_call_recovery = on
-        with contextlib.redirect_stdout(io.StringIO()):
+        with capture_console(io.StringIO()):
             evs = [x for kind, x in svc.run(tok.encode("hi"), True, ToolCallRecovery.SCHEMA, 3000, {},
                                             threading.Event()) if kind == "event"]
         return [e.call.arguments for e in evs if e.kind == "tool_call"]
@@ -1705,7 +1707,7 @@ class SharedPrefix(unittest.TestCase):
         for spec in ({"messages": 3}, {"messages": 9}, {"tokens": len(ids)},       # leaves no last message / no suffix
                      {"message": 1, "chars": 5000}, {"message": 7, "chars": 3}):   # more text than the message has
             req = {"strata_prefix": spec}
-            with contextlib.redirect_stdout(io.StringIO()):
+            with capture_console(io.StringIO()):
                 self.svc.prepare(self.MSGS, None, {}, 16, req=req)
             self.assertEqual(req["strata_prefix"], {}, spec)                     # said in the log, never a refusal
         for bad in ({"messages": 0}, {"messages": "2"}, {"messages": True}, {"tokens": 1.5}, {"x": 1},
@@ -1909,7 +1911,7 @@ class GpuChoice(unittest.TestCase):
             probe.write_text("")
             cfg = {"backend": "hip", "exe": str(exe), "args": []}
             done = SimpleNamespace(returncode=0, stdout=self.DEVICES_MINI_PC)
-            with mock.patch("serve.server.subprocess.run", return_value=done) as run, contextlib.redirect_stdout(io.StringIO()) as out:
+            with mock.patch("serve.server.subprocess.run", return_value=done) as run, capture_console(io.StringIO()) as out:
                 self.assertEqual(hip_auto_devices(cfg, {}), [1])
                 self.assertEqual(run.call_args[0][0], [str(probe), "--list-devices"])
                 self.assertIn("automatic GPU choice: GPU 1", out.getvalue())
@@ -2408,7 +2410,7 @@ class PcieShare(unittest.TestCase):
             "DONE 4 20 40.0 30.0 stop 3 5 0 60 100 0 0 0.0 20 0",
             "DONE 4 20 40.0 30.0 stop 3 5 0 60 100 0 0 0.0 20"])       # an older engine
         svc = Service(engine, tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
-        with contextlib.redirect_stdout(io.StringIO()) as out:
+        with capture_console(io.StringIO()) as out:
             for _ in range(3):
                 list(svc.run(tok.encode("hi"), False, None, 10, {}, threading.Event()))
         rows = list(svc.history)
@@ -2499,7 +2501,7 @@ class RepeatStop(unittest.TestCase):
         if limit is not None:
             svc.repeat_stop_tokens = limit
         ids = tok.encode("hi")
-        with contextlib.redirect_stdout(io.StringIO()) as out:
+        with capture_console(io.StringIO()) as out:
             done = [x for kind, x in svc.run(ids, False, None, 3000, {}, threading.Event()) if kind == "done"][0]
         return done, out.getvalue()
 
@@ -2555,7 +2557,7 @@ class NonFiniteLogits(unittest.TestCase):
         svc = Service(eng, tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
         ids = tok.encode("hi")
         events, done, error = [], None, None
-        with contextlib.redirect_stdout(io.StringIO()) as out:
+        with capture_console(io.StringIO()) as out:
             try:
                 for kind, x in svc.run(ids, False, None, 100, {}, threading.Event()):
                     if kind == "done":
@@ -2609,7 +2611,7 @@ class NonFiniteLogits(unittest.TestCase):
                     body = {"model": "m", "max_output_tokens": 20, "input": "hi"}
                 req = urllib.request.Request(base + path, data=json.dumps(body).encode(),
                                              headers={"Content-Type": "application/json"})
-                with contextlib.redirect_stdout(io.StringIO()):
+                with capture_console(io.StringIO()):
                     try:
                         with urllib.request.urlopen(req, timeout=30) as r:
                             code, text = r.status, r.read().decode()
@@ -2793,7 +2795,7 @@ class StartCrashReported(unittest.TestCase):
                     mock.patch.object(server, "narrate_start", lambda *a, **k: None), \
                     mock.patch.object(server, "START_RETRIES", retries), \
                     mock.patch.object(server.time, "sleep", lambda s: None), \
-                    contextlib.redirect_stdout(out):
+                    capture_console(out):
                 with self.assertRaises(RuntimeError) as cm:
                     StrataEngine("strata", [], log=str(log))
             return str(cm.exception), out.getvalue()
@@ -2882,7 +2884,7 @@ class StartNarrator(unittest.TestCase):
         log = Path(d) / "engine.log"
         log.write_text("".join(x + "\n" for x in lines), encoding="utf-8")
         done, out = threading.Event(), io.StringIO()
-        with contextlib.redirect_stdout(out):
+        with capture_console(out):
             t = threading.Thread(target=narrate_start, args=(str(log), 0, args, done))
             t.start()
             time.sleep(0.8)
@@ -3240,12 +3242,12 @@ class ConfigReasoningEffort(unittest.TestCase):
         from serve.server import lift_reasoning_effort_arg
         for args in (["--ctx", "4096", "--reasoning-effort", "low"], ["--reasoning-effort=low", "--ctx", "4096"]):
             cfg = {"args": args}
-            with mock.patch("builtins.print"):
+            with mock.patch("serve.server.console_print"):
                 lift_reasoning_effort_arg(cfg)
             self.assertEqual(cfg["args"], ["--ctx", "4096"])
             self.assertEqual(cfg["reasoning_effort"], "low")
         cfg = {"args": ["--reasoning-effort", "low"], "reasoning_effort": "none"}
-        with mock.patch("builtins.print"):
+        with mock.patch("serve.server.console_print"):
             lift_reasoning_effort_arg(cfg)
         self.assertEqual((cfg["args"], cfg["reasoning_effort"]), ([], "none"))      # the key wins
         cfg = {"args": ["--ctx", "4096"]}
@@ -3259,7 +3261,7 @@ class JoinedEngineArgs(unittest.TestCase):
     def split(self, args):
         from serve.server import split_joined_args
         cfg = {"args": list(args)}
-        with mock.patch("builtins.print") as pr:
+        with mock.patch("serve.server.console_print") as pr:
             split_joined_args(cfg)
         return cfg["args"], pr.called
 
@@ -4346,7 +4348,7 @@ class ThinkingBudget(unittest.TestCase):
         st = {"phase": "thinking", "generated": 10, "first_token": time.time() - 1, "started": time.time() - 2,
               "max_tokens": 6400, "thinking_budget": 2048}
         out = io.StringIO()
-        with contextlib.redirect_stdout(out):
+        with capture_console(out):
             self.svc._progress(0, st=st)
             self.svc._progress(0, st={**st, "phase": "answering"})
             self.svc._progress(0, st={**st, "thinking_budget": None})
@@ -4359,7 +4361,7 @@ class ThinkingBudget(unittest.TestCase):
         """#984: max_tokens 300 and a budget of 5000 never fired: the reply ended while still thinking.  The thinking
         is closed at max_tokens less the answer's reserve (max 512 or a quarter, at most half), with one log line."""
         out = io.StringIO()
-        with contextlib.redirect_stdout(out):
+        with capture_console(out):
             code, b = self.openai(max_tokens=300, reasoning_budget_tokens=5000)
         self.assertEqual(code, 200, b)
         msg = b["choices"][0]["message"]
@@ -4370,7 +4372,7 @@ class ThinkingBudget(unittest.TestCase):
 
     def test_a_budget_well_below_max_tokens_is_not_capped(self):
         out = io.StringIO()
-        with contextlib.redirect_stdout(out):
+        with capture_console(out):
             code, b = self.openai(max_tokens=3000, reasoning_budget_tokens=20)
         self.assertNotIn("thinking capped", out.getvalue())
         self.assertEqual(len(self.engine.prompts), 2)
@@ -4411,7 +4413,7 @@ class ThinkingBudget(unittest.TestCase):
         for extra, said in (({"max_tokens": 10}, True), ({}, False)):
             with self.subTest(extra=extra):
                 out = io.StringIO()
-                with contextlib.redirect_stdout(out):
+                with capture_console(out):
                     code, b = self.openai(**extra)
                 self.assertEqual(code, 200, b)
                 self.assertEqual(b["choices"][0]["finish_reason"], "length" if said else "stop")
@@ -5982,7 +5984,7 @@ class BudgetOverRam(unittest.TestCase):
         import serve.server as S
         vm = SimpleNamespace(total=total * 2**30, available=free * 2**30)
         fake = SimpleNamespace(virtual_memory=lambda: vm)
-        with mock.patch.dict(sys.modules, {"psutil": fake}), contextlib.redirect_stdout(io.StringIO()):
+        with mock.patch.dict(sys.modules, {"psutil": fake}), capture_console(io.StringIO()):
             return S.warn_budget_over_ram(["--native", "x", "--resident-budget-gib", str(budget)])
 
     def test_over_free_ram_warns(self):
