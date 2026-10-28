@@ -71,11 +71,12 @@ struct ConversationKv {
     // any buffer.
     std::shared_ptr<void> pending;
     ConversationKv() = default;
-    // Copying requires completed payload writes; moving transfers in-flight ownership.
-    ConversationKv(const ConversationKv&) = default;
+    ConversationKv(const ConversationKv&) = delete;
+    ConversationKv& operator=(const ConversationKv&) = delete;
     ConversationKv(ConversationKv&&) noexcept = default;
     // Replace the complete owner; the old copy tokens are destroyed before its buffers.
-    ConversationKv& operator=(ConversationKv replacement) noexcept {
+    ConversationKv& operator=(ConversationKv&& incoming) noexcept {
+        ConversationKv replacement(std::move(incoming));
         using std::swap;
         swap(format, replacement.format);
         swap(cells, replacement.cells);
@@ -100,6 +101,11 @@ struct ConversationKv {
 };
 
 struct ConversationKvReuse {
+    ConversationKvReuse() = default;
+    ConversationKvReuse(const ConversationKvReuse&) = delete;
+    ConversationKvReuse& operator=(const ConversationKvReuse&) = delete;
+    ConversationKvReuse(ConversationKvReuse&&) noexcept = default;
+    ConversationKvReuse& operator=(ConversationKvReuse&&) noexcept = default;
     std::vector<ConversationKv> kv;
     // Original image extent for validation, and the earliest subsequent rewrite.
     int64_t captured_tokens = 0, unchanged_tokens = 0;
@@ -213,11 +219,12 @@ struct SavedConversation {
     std::shared_ptr<void> live_pending;
 
     SavedConversation() = default;
-    // Copying requires completed writes in this image and its layers/stages.
-    SavedConversation(const SavedConversation&) = default;
+    SavedConversation(const SavedConversation&) = delete;
+    SavedConversation& operator=(const SavedConversation&) = delete;
     SavedConversation(SavedConversation&&) noexcept = default;
     // Replace the complete owner; the old copy tokens are destroyed before its buffers.
-    SavedConversation& operator=(SavedConversation replacement) noexcept {
+    SavedConversation& operator=(SavedConversation&& incoming) noexcept {
+        SavedConversation replacement(std::move(incoming));
         using std::swap;
         swap(geometry, replacement.geometry);
         swap(layer_lo, replacement.layer_lo);
@@ -292,6 +299,10 @@ public:
 
     ConversationCache(size_t budget, size_t slots, int64_t min_tokens = 0)
         : budget_(budget), slots_(slots), min_tokens_(min_tokens) {}
+    ConversationCache(const ConversationCache&) = delete;
+    ConversationCache& operator=(const ConversationCache&) = delete;
+    ConversationCache(ConversationCache&&) = delete;
+    ConversationCache& operator=(ConversationCache&&) = delete;
     bool enabled() const { return budget_ != 0 && slots_ != 0; }
     /// `--conversation-cache-min-tokens`: whether a conversation of this length is worth one of `slots`.  Every
     /// parked conversation costs a whole slot whatever its length, so a client that interleaves short side requests
@@ -315,8 +326,15 @@ public:
     void retain(std::vector<ConversationKv>&& kv, int64_t tokens,
                 std::vector<std::vector<ConversationKv>>&& stage_kv = {}, std::vector<int32_t> ids = {}) {
         reuse_ = {};
-        ConversationKvReuse candidate{std::move(kv), tokens, tokens, {}, std::move(ids)};
-        for (auto& k : stage_kv) candidate.stages.push_back(ConversationKvReuse{std::move(k), tokens, tokens, {}, {}});
+        ConversationKvReuse candidate;
+        candidate.kv = std::move(kv);
+        candidate.captured_tokens = candidate.unchanged_tokens = tokens;
+        candidate.ids = std::move(ids);
+        for (auto& k : stage_kv) {
+            auto& stage = candidate.stages.emplace_back();
+            stage.kv = std::move(k);
+            stage.captured_tokens = stage.unchanged_tokens = tokens;
+        }
         if (enabled() && candidate.bytes() <= budget_ - bytes_) reuse_ = std::move(candidate);
     }
     void limit_reuse(int64_t first_dirty) {

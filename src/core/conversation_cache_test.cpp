@@ -37,8 +37,21 @@ SavedConversation holder(std::initializer_list<int32_t> ids, std::initializer_li
 
 namespace {
 void test_owner_assignment() {
+    static_assert(!std::is_copy_constructible_v<ConversationKvReuse>);
+    static_assert(!std::is_copy_assignable_v<ConversationKvReuse>);
+    static_assert(std::is_nothrow_move_constructible_v<ConversationKvReuse>);
+    static_assert(std::is_nothrow_move_assignable_v<ConversationKvReuse>);
+    static_assert(!std::is_copy_constructible_v<ConversationCache>);
+    static_assert(!std::is_copy_assignable_v<ConversationCache>);
+    static_assert(!std::is_move_constructible_v<ConversationCache>);
+    static_assert(!std::is_move_assignable_v<ConversationCache>);
+    static_assert(!std::is_copy_constructible_v<SavedConversation>);
+    static_assert(!std::is_copy_assignable_v<SavedConversation>);
+    static_assert(!std::is_copy_constructible_v<ConversationKv>);
+    static_assert(!std::is_copy_assignable_v<ConversationKv>);
     static_assert(std::is_nothrow_move_constructible_v<SavedConversation>);
     static_assert(std::is_nothrow_move_assignable_v<SavedConversation>);
+    static_assert(std::is_nothrow_move_constructible_v<ConversationKv>);
     static_assert(std::is_nothrow_move_assignable_v<ConversationKv>);
     int joined = 0;
     auto token = [&](uint8_t* p) {
@@ -67,9 +80,10 @@ void test_owner_assignment() {
         auto a = pending_image();
         SavedConversation complete;
         complete.live.gdn.assign(64, 9);
-        a = complete;
-        check(joined == 3 && a.live.gdn[0] == 9 && a.live.gdn.data() != complete.live.gdn.data(),
-              "copy from a completed image retires the destination and owns independent storage");
+        auto* payload = complete.live.gdn.data();
+        a = std::move(complete);
+        check(joined == 3 && a.live.gdn[0] == 9 && a.live.gdn.data() == payload,
+              "completed replacement retires the destination and transfers storage");
     }
     {
         ConversationKv a, b;
