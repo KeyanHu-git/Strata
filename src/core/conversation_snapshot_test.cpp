@@ -444,8 +444,10 @@ int main() {
                 check(conversation_kv_restore(a,f.state,f.g,upto,index,err),"unrotated image still restores");
             }
             if (!a.k.empty()) {
-                bad=a; bad.k.pop_back();
-                check(!conversation_kv_restore(bad,f.state,f.g,upto,index,err),"reject malformed payload");
+                ConversationKv malformed;
+                check(conversation_kv_save(malformed,f.state,f.g,upto,index,err),"capture independent malformed fixture");
+                malformed.k.pop_back();
+                check(!conversation_kv_restore(malformed,f.state,f.g,upto,index,err),"reject malformed payload");
             }
         }
     }
