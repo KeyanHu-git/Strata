@@ -1,8 +1,0 @@
- 1272 |     int64_t reads() const { return reads_.load(std::memory_order_relaxed); }
-      |             ^
-<workspace>/source/include/strata/core/expert_source.hpp:203:21: note: overridden virtual function is here
-  203 |     virtual int64_t reads() const { return 0; }
-      |                     ^
-1 warning generated.
-[53/56] Linking CXX executable strata
-ld: warning: ignoring duplicate libraries: 'libstrata_metal_host.a', 'libstrata_metal_kernels.a'

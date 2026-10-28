@@ -1,8 +1,0 @@
-<workspace>/source/sycl/include/dpct/graph.hpp:176:13: warning: unused function 'get_nodes' [-Wunused-function]
-  176 | static void get_nodes(dpct::experimental::command_graph_ptr graph,
-      |             ^~~~~~~~~
-<workspace>/source/sycl/include/dpct/graph.hpp:187:13: warning: unused function 'get_root_nodes' [-Wunused-function]
-  187 | static void get_root_nodes(dpct::experimental::command_graph_ptr graph,
-      |             ^~~~~~~~~~~~~~
-37 warnings generated.
-[134/134] Linking CXX executable strata
