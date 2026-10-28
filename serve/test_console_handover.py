@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 from serve import console as console_module
+from serve.test_console_support import blocked_console
 from serve.frontend import ChatTemplate
 from serve.server import ByteTokenizer, EngineDied, EngineSilent, MockEngine, Service
 
@@ -28,10 +29,6 @@ class PausedConsole:
         with self.lock:
             self.lines.append(text)
         return len(text)
-
-    def flush(self):
-        if self.paused.is_set():
-            self.resume.wait(30)
 
 
 class PausedCompletionHandover(unittest.TestCase):
@@ -110,8 +107,8 @@ class PausedCompletionHandover(unittest.TestCase):
 
                 one = threading.Thread(target=first, daemon=True)
                 two = threading.Thread(target=second, daemon=True)
-                output_writer = console_module.Console(console.write)
-                with mock.patch.object(console_module, "_console", output_writer):
+                output_writer = console_module.Console()
+                with blocked_console(output_writer, console.write):
                     one.start()
                     try:
                         self.assertTrue(console.paused.wait(3), "first request did not reach completion output")

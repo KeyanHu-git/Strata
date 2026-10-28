@@ -117,7 +117,7 @@ def cpu_sets(n: int, enabled: bool = True):
         from serve.cpu_affinity import partition_cpu_sets
         return partition_cpu_sets(n, set(os.sched_getaffinity(0)))
     except (ValueError, OSError, ImportError) as e:
-        console_print(f"[strata] replicas: no separate CPU cores ({e})", flush=True)
+        print(f"[strata] replicas: no separate CPU cores ({e})", flush=True)
         return None
 
 
@@ -324,7 +324,7 @@ class ReplicaEngine:
         if errors and not self.alive():
             raise next(iter(errors.values()))
         for k, e in errors.items():
-            console_print(f"[strata] replica {k} did not start ({e}); the others serve", flush=True)
+            console_print(f"[strata] replica {k} did not start ({e}); the others serve")
 
     def unload(self):
         for e in self.engines:
@@ -372,12 +372,12 @@ class ReplicaEngine:
 
             def run(k=k):
                 try:
-                    console_print(f"[strata] replica {k} had stopped; starting it again", flush=True)
+                    console_print(f"[strata] replica {k} had stopped; starting it again")
                     self.engines[k].restart()
                     self.router.forget(k)
-                    console_print(f"[strata] replica {k} is running again", flush=True)
+                    console_print(f"[strata] replica {k} is running again")
                 except BaseException as x:       # noqa: BLE001
-                    console_print(f"[strata] replica {k} did not start again: {x}", flush=True)
+                    console_print(f"[strata] replica {k} did not start again: {x}")
                 finally:
                     self.healing[k] = False
             threading.Thread(target=run, daemon=True).start()

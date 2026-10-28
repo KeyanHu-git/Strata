@@ -1,5 +1,5 @@
 """Focused diagnostics tests; no engine, model or device required."""
-from contextlib import redirect_stdout
+import gc
 import io
 import os
 from pathlib import Path
@@ -10,80 +10,100 @@ import threading
 import time
 import unittest
 from unittest import mock
+import weakref
 
 from serve import console as module
 from serve.console import Console
 
 
 class ConsoleTest(unittest.TestCase):
-    def blocked(self, **limits):
+    def setUp(self):
+        # All injected writers use the production _Sink.write(self, text)
+        # boundary; capture still creates real owned descriptors.
+        self.stdout = self.enterContext(tempfile.TemporaryFile(mode='w+b'))
+        self.stderr = self.enterContext(tempfile.TemporaryFile(mode='w+b'))
+        self.enterContext(mock.patch.object(sys, 'stdout', self.stdout))
+        self.enterContext(mock.patch.object(sys, 'stderr', self.stderr))
+
+    def writer(self, write=None):
+        if write is not None:
+            self.enterContext(mock.patch.object(module._Sink, 'write', write))
+        console = Console()
+        self.addCleanup(lambda: console.close(1))
+        return console
+
+    def blocked(self):
         entered, release = threading.Event(), threading.Event()
         output = []
 
-        def write(text):
-            entered.set()
-            release.wait(5)
+        def write(sink, text):
+            if text == 'first':
+                entered.set()
+                release.wait(5)
             output.append(text)
 
-        console = Console(write, **limits)
-        self.addCleanup(lambda: console.close(1))
+        console = self.writer(write)
         self.addCleanup(release.set)
         console.emit('first')
         self.assertTrue(entered.wait(1))
         return console, release, output
 
-    def test_count_and_overload_summary(self):
-        console, release, output = self.blocked(max_messages=2)
-        self.assertTrue(console.emit('a'))
-        self.assertTrue(console.emit('b'))
+    def test_count_capacity_and_best_effort_summary(self):
+        console, release, output = self.blocked()
+        for i in range(128):
+            self.assertTrue(console.emit(str(i)))
         for _ in range(100):
-            self.assertFalse(console.emit('c'))
-        self.assertEqual(console.stats['queued_messages'], 2)
-        self.assertEqual(console.stats['dropped'], 100)
+            self.assertFalse(console.emit('dropped'))
         release.set()
         self.assertTrue(console.close(1))
-        self.assertEqual(output, ['first', '[console: dropped 100 diagnostics]\n', 'a', 'b'])
+        self.assertEqual([x for x in output if not x.startswith('[console:')],
+                         ['first'] + list(map(str, range(128))))
+        self.assertEqual(output.count('[console: dropped 100 diagnostics]\n'), 1)
 
-    def test_byte_capacity_and_utf8_line_limit(self):
-        console, release, output = self.blocked(max_bytes=14, max_line_bytes=8)
-        self.assertTrue(console.emit('😀' * 10000))
-        self.assertTrue(console.emit('123456'))
+    def test_byte_capacity_and_utf8_truncation(self):
+        console, release, output = self.blocked()
+        for _ in range(16):
+            self.assertTrue(console.emit('😀' * 10000))
         self.assertFalse(console.emit('x'))
-        self.assertEqual(console.stats['queued_bytes'], 14)
         release.set()
-        console.close(1)
-        self.assertIn('😀...\n', output)
-        self.assertTrue(all(len(text.encode('utf-8')) <= 8 for text in output))
+        self.assertTrue(console.close(1))
+        lines = [s for s in output if s.startswith('😀')]
+        self.assertEqual(len(lines), 16)
+        self.assertTrue(all(len(s.encode('utf-8')) == 4096 for s in lines))
+        self.assertTrue(all(s.endswith('...\n') for s in lines))
 
-    def test_progress_slot_identity_and_invalidation(self):
-        console, release, output = self.blocked(max_messages=2, max_bytes=20)
-        old, new = [], []  # Equal, unhashable keys still have distinct identities.
-        console.emit('old', old)
-        console.emit('latest', old)
-        self.assertEqual(console.stats['queued_messages'], 1)
-        self.assertEqual(console.stats['queued_bytes'], 6)
-        console.emit('new', new)
+    def test_progress_identity_replacement_and_invalidation_reclaim_capacity(self):
+        console, release, output = self.blocked()
+        old, new = [], []  # Equal/unhashable keys are still distinct identities.
+        self.assertTrue(console.emit('x' * 4096, old))
+        for _ in range(15):
+            self.assertTrue(console.emit('q' * 4096))
+        self.assertFalse(console.emit('full'))
+        self.assertTrue(console.emit('latest', new))
         console.discard_progress(old)
-        self.assertEqual(console.stats['queued_bytes'], 3)
+        self.assertIs(console._progress[2], new)
         console.discard_progress(new)
-        self.assertEqual(console.stats['queued_messages'], 0)
-        self.assertEqual(console.stats['queued_bytes'], 0)
-        console.emit('final', new)
+        self.assertTrue(console.emit('final', new))
         release.set()
-        console.close(1)
-        self.assertEqual(output, ['first', 'final'])
+        self.assertTrue(console.close(1))
+        self.assertEqual(output[-1], 'final')
+        self.assertNotIn('latest', output)
+        self.assertNotIn('x' * 4096, output)
 
-    def test_progress_counts_toward_capacity(self):
-        console, _, _ = self.blocked(max_messages=1, max_bytes=8)
+    def test_progress_counts_toward_record_limit(self):
+        console, _, _ = self.blocked()
         key = object()
         self.assertTrue(console.emit('progress', key))
-        self.assertFalse(console.emit('normal'))
-        self.assertTrue(console.emit('new', key))
-        self.assertEqual(console.stats['queued_bytes'], 3)
+        for _ in range(127):
+            self.assertTrue(console.emit('normal'))
+        self.assertFalse(console.emit('overflow'))
+        self.assertTrue(console.emit('updated', key))
+        console.discard_progress(key)
+        self.assertTrue(console.emit('reclaimed'))
 
     def test_blocked_sink_producers_and_close_are_bounded(self):
-        console, _, _ = self.blocked()
-        worker = console._worker
+        console, release, _ = self.blocked()
+        sink = console._sinks[0][1]
         done = threading.Event()
 
         def produce():
@@ -97,232 +117,197 @@ class ConsoleTest(unittest.TestCase):
         start = time.monotonic()
         self.assertFalse(console.close(.02))
         self.assertLess(time.monotonic() - start, .5)
+        self.assertFalse(sink.raw.closed)
         self.assertFalse(console.emit('after close'))
-        self.assertIs(console._worker, worker)
+        release.set()
+        self.assertTrue(console.close(1))
         thread.join(1)
 
-    def test_sink_failure_does_not_kill_writer(self):
+    def test_failure_is_local_and_new_destination_recovers(self):
         output = []
-
-        def write(text):
-            if text == 'bad':
-                raise OSError('closed sink')
-            output.append(text)
-
-        console = Console(write)
-        console.emit('bad')
-        console.emit('good')
-        self.assertTrue(console.close(1))
-        self.assertEqual(output, ['good'])
-        self.assertEqual(console.stats['failures'], 1)
-
-    def test_module_injection_and_formatting(self):
-        output = []
-        console = Console(output.append)
-        key = object()
-        with mock.patch.object(module, '_console', console):
-            module.console_print('a', 2, sep=':', end='!', flush=True)
-            module.console_print('b', file=sys.stderr)
-            module.progress('p', key)
-            module.invalidate_progress(object())
-        self.assertTrue(console.close(1))
-        self.assertEqual(output, ['a:2!', 'b\n', 'p\n'])
-
-    def test_default_transport_routes_and_never_uses_buffered_methods(self):
-        with mock.patch.object(module.os, 'name', 'posix'), \
-             mock.patch.object(module.os, 'dup') as dup, \
-             mock.patch.object(module.os, 'write', side_effect=lambda fd, b: len(b)) as write, \
-             mock.patch.object(module.os, 'close') as close:
-            stdout, stderr = mock.Mock(), mock.Mock()
-            stdout.fileno.return_value = 1
-            stderr.fileno.return_value = 2
-            stdout.encoding = stderr.encoding = 'utf-8'
-            custom = io.StringIO()
-            console = Console(module._standard_write)
-            with mock.patch.object(module, '_console', console), \
-                 mock.patch.object(sys, 'stdout', stdout), \
-                 mock.patch.object(sys, 'stderr', stderr):
-                module.console_print('out')
-                module.console_print('err', file=sys.stderr)
-                module.console_print('custom', file=custom)
-                self.assertTrue(console.close(1))
-            dup.assert_not_called()
-            self.assertEqual([call.args[0] for call in write.call_args_list], [1, 2])
-            self.assertEqual([bytes(call.args[1]) for call in write.call_args_list], [b'out\n', b'err\n'])
-            close.assert_not_called()
-            stdout.write.assert_not_called()
-            stderr.write.assert_not_called()
-            stdout.flush.assert_not_called()
-            stderr.flush.assert_not_called()
-            self.assertEqual(custom.getvalue(), 'custom\n')
-
-    def test_publication_captures_redirected_stream(self):
-        entered, release = threading.Event(), threading.Event()
-        original = module._transport
-        captured = io.StringIO()
-        console = Console(module._standard_write)
-        self.addCleanup(lambda: console.close(1))
-        self.addCleanup(release.set)
-
-        def transport(text, stream):
-            if text == 'hold':
-                entered.set()
-                release.wait(2)
-                return
-            original(text, stream)
-
-        with mock.patch.object(module, '_transport', side_effect=transport), \
-             mock.patch.object(module, '_console', console):
-            console.emit('hold')
-            self.assertTrue(entered.wait(1))
-            with redirect_stdout(captured):
-                module.console_print('captured')
-                module.progress('progress', object())
-            release.set()
-            self.assertTrue(module.wait_idle(1))
-        self.assertEqual(captured.getvalue(), 'captured\nprogress\n')
-
-    def test_wait_idle_timeout_and_later_reuse(self):
-        console, release, output = self.blocked()
-        start = time.monotonic()
-        self.assertFalse(console.wait_idle(.02))
-        self.assertLess(time.monotonic() - start, .5)
-        release.set()
-        self.assertTrue(console.wait_idle(1))
-        self.assertTrue(console.emit('after drain'))
-        self.assertTrue(console.wait_idle(1))
-        self.assertEqual(output, ['first', 'after drain'])
-
-    def test_custom_stream_flush_runs_on_worker(self):
-        thread_ids = []
-        stream = io.StringIO()
-        console = Console(module._standard_write)
-        with mock.patch.object(stream, 'flush', side_effect=lambda: thread_ids.append(
-                threading.get_ident())), mock.patch.object(module, '_console', console):
-            module.console_print('custom', file=stream)
-            self.assertTrue(console.wait_idle(1))
-        self.assertTrue(console.close(1))
-        self.assertEqual(thread_ids, [console._worker.ident])
-        self.assertEqual(stream.getvalue(), 'custom\n')
-
-    def test_failed_standard_channel_is_disabled_independently(self):
-        console = Console(module._standard_write)
-        stdout, stderr = io.StringIO(), io.StringIO()
         attempts = []
 
-        def transport(text, stream):
+        def write(sink, text):
             attempts.append(text)
-            if stream is stdout:
-                raise OSError('broken stdout')
-            stream.write(text)
+            if text == 'bad':
+                raise OSError('broken destination')
+            output.append(text)
 
-        with mock.patch.object(module, '_transport', side_effect=transport), \
-             mock.patch.object(module, '_console', console), \
-             mock.patch.object(sys, 'stdout', stdout), \
-             mock.patch.object(sys, 'stderr', stderr):
-            module.console_print('fail')
-            self.assertTrue(console.wait_idle(1))
-            for _ in range(20):
-                module.console_print('suppressed')
-            module.console_print('healthy', file=stderr)
-            self.assertTrue(console.close(1))
-        self.assertEqual(attempts, ['fail\n', 'healthy\n'])
-        self.assertEqual(console.stats['failures'], 1)
-        self.assertEqual(console.stats['dropped'], 20)
-        self.assertEqual(stderr.getvalue(), 'healthy\n')
-
-    def test_truncation_marker_newline_and_no_double_progress_newline(self):
-        output = []
-        console = Console(output.append, max_line_bytes=12)
-        with mock.patch.object(module, '_console', console):
-            module.console_print('12345678901234567890')
-            module.console_print('next')
-            module.progress('progress\n', object())
+        console = self.writer(write)
+        console.emit('bad')
+        console.emit('same destination')
+        with tempfile.TemporaryFile() as new, mock.patch.object(sys, 'stdout', new):
+            console.emit('new destination')
         self.assertTrue(console.close(1))
-        self.assertEqual(output, ['12345678...\n', 'next\n', 'progress\n'])
-        for limit in range(1, 5):
-            small = Console(lambda text: None, max_line_bytes=limit)
-            self.assertEqual(small._bounded('x' * 10), '.' * (limit - 1) + '\n')
-            self.assertTrue(small.close(1))
+        self.assertEqual(attempts, ['bad', 'same destination', 'new destination'])
+        self.assertEqual(output, ['same destination', 'new destination'])
 
-    def test_transport_borrows_fd_without_closing_or_duplicating(self):
-        with tempfile.TemporaryFile(mode='w+b') as stream:
-            with mock.patch.object(module.os, 'dup') as dup:
-                module._transport('borrowed', stream)
-            dup.assert_not_called()
-            os.fstat(stream.fileno())
-            stream.seek(0)
-            self.assertEqual(stream.read(), b'borrowed')
+    def test_module_lines_routing_and_progress(self):
+        console = self.writer()
+        with mock.patch.object(module, '_console', console):
+            module.console_print('a', 2)
+            module.console_print('err', stderr=True)
+            module.progress('p\n', object())
+            module.invalidate_progress(object())
+            with self.assertRaises(ValueError):
+                module.progress('bad', None)
+        self.assertTrue(console.close(1))
+        self.stdout.seek(0)
+        self.stderr.seek(0)
+        newline = os.linesep.encode()
+        self.assertEqual(self.stdout.read(), b'a 2' + newline + b'p' + newline)
+        self.assertEqual(self.stderr.read(), b'err' + newline)
+
+    def test_capture_failure_never_falls_back_or_disables_channel(self):
+        console, release, output = self.blocked()
+        for missing in (None, io.StringIO()):
+            with mock.patch.object(sys, 'stdout', missing):
+                self.assertFalse(console.emit('unavailable'))
+        self.assertTrue(console.emit('recovered'))
+        release.set()
+        self.assertTrue(console.close(1))
+        self.assertEqual(output, ['first', 'recovered'])
+
+    def test_cache_identity_uses_two_noninheritable_owners_under_saturation(self):
+        console, release, _ = self.blocked()
+        first = console._sinks[0][1]
+        with mock.patch.object(module.os, 'dup', wraps=os.dup) as dup:
+            for _ in range(127):
+                console.emit('out')
+            console.emit('err', stderr=True)
+            self.assertFalse(console.emit('overflow'))
+            self.assertEqual(dup.call_count, 1)
+        second = console._sinks[1][1]
+        self.assertIs(console._sinks[0][1], first)
+        self.assertNotEqual(first.raw.fileno(), second.raw.fileno())
+        self.assertFalse(os.get_inheritable(first.raw.fileno()))
+        self.assertFalse(os.get_inheritable(second.raw.fileno()))
+        release.set()
+        self.assertTrue(console.close(1))
+
+    def test_a_b_a_switch_retains_records_then_releases_owners(self):
+        console, release, _ = self.blocked()
+        first_released, second_released = threading.Event(), threading.Event()
+        first = weakref.ref(console._sinks[0][1], lambda _: first_released.set())
+        with tempfile.TemporaryFile() as other:
+            with mock.patch.object(sys, 'stdout', other):
+                console.emit('B')
+                second = weakref.ref(console._sinks[0][1], lambda _: second_released.set())
+            console.emit('A again')
+            third = weakref.ref(console._sinks[0][1])
+        self.assertIsNotNone(first())
+        self.assertIsNotNone(second())
+        self.assertIsNot(first(), third())
+        release.set()
+        # Superseded owners release as their records finish, without close
+        # clearing the caches. The current destination remains cached.
+        self.assertTrue(first_released.wait(1))
+        self.assertTrue(second_released.wait(1))
+        self.assertIsNone(first())
+        self.assertIsNone(second())
+        self.assertFalse(console._closed)
+        self.assertIsNotNone(third())
+        self.assertIs(console._sinks[0][1], third())
+        self.assertTrue(console.close(1))
+        gc.collect()
+        self.assertIsNone(third())
+
+    def test_close_and_fd_reuse_during_partial_write_keep_original_destination(self):
+        entered, release = threading.Event(), threading.Event()
+        original_write = module._Sink.write
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            original = open(path / 'original', 'w+b', buffering=0)
+            self.addCleanup(original.close)
+            fd = original.fileno()
+
+            class PartialRaw:
+                def __init__(self, raw):
+                    self.raw = raw
+                    self.first = True
+
+                def close(self):
+                    self.raw.close()
+
+                def write(self, data):
+                    result = self.raw.write(data[:1])
+                    if self.first:
+                        self.first = False
+                        entered.set()
+                        release.wait(5)
+                    return result
+
+            def write(sink, text):
+                sink.raw = PartialRaw(sink.raw)
+                original_write(sink, text)
+
+            console = self.writer(write)
+            self.addCleanup(release.set)
+            with mock.patch.object(sys, 'stdout', original):
+                self.assertTrue(console.emit('original destination'))
+            self.assertTrue(entered.wait(1))
+            original.close()
+            with open(path / 'replacement', 'w+b', buffering=0) as replacement:
+                self.assertEqual(replacement.fileno(), fd)
+                self.assertFalse(console.close(.01))
+                release.set()
+                self.assertTrue(console.close(1))
+                replacement.write(b'new file')
+            self.assertEqual((path / 'original').read_bytes(), b'original destination')
+            self.assertEqual((path / 'replacement').read_bytes(), b'new file')
 
     def test_pipe_newlines_match_default_text_wrapper(self):
         outputs = []
-        for raw in (False, True):
+        for owned in (False, True):
             reader_fd, writer_fd = os.pipe()
             with os.fdopen(reader_fd, 'rb') as reader:
                 with os.fdopen(writer_fd, 'w', encoding='utf-8') as writer:
-                    if raw:
-                        module._transport('alpha\nbeta\n', writer)
+                    if owned:
+                        sink = module._Sink(writer)
+                        sink.write('alpha\nbeta\n')
+                        sink.raw.close()
                     else:
                         writer.write('alpha\nbeta\n')
                 outputs.append(reader.read())
-        newline = b'\r\n' if os.name == 'nt' else b'\n'
-        self.assertEqual(outputs[0], b'alpha' + newline + b'beta' + newline)
+        self.assertEqual(outputs[0], b'alpha' + os.linesep.encode() + b'beta' + os.linesep.encode())
         self.assertEqual(outputs[1], outputs[0])
 
-    def test_transport_handles_partial_writes(self):
-        stream = mock.Mock()
-        stream.fileno.return_value = 7
-        stream.encoding = 'ascii'
+    def test_stream_encoding_and_raw_transport_avoid_buffered_methods(self):
+        destination = mock.Mock(encoding='ascii')
+        destination.fileno.return_value = self.stdout.fileno()
+        sink = module._Sink(destination)
+        sink.write('aé!')
+        sink.raw.close()
+        self.stdout.seek(0)
+        self.assertEqual(self.stdout.read(), b'a?!')
+        destination.write.assert_not_called()
+        destination.flush.assert_not_called()
+
+    def test_windows_unicode_partial_writes_and_redirected_encoding(self):
         chunks = []
-
-        def write(fd, data):
-            self.assertEqual(fd, 7)
-            chunks.append(bytes(data[:1]))
-            return 1
-
-        with mock.patch.object(module.os, 'name', 'posix'), \
-             mock.patch.object(module.os, 'write', side_effect=write), \
-             mock.patch.object(module.os, 'close') as close:
-            module._transport('aé!', stream)
-        self.assertEqual(b''.join(chunks), b'a?!')
-        close.assert_not_called()
-        stream.write.assert_not_called()
-
-    def test_windows_console_transport_uses_utf8_and_handles_partial_writes(self):
-        stream = mock.Mock()
-        stream.fileno.return_value = 7
-        stream.encoding = 'ascii'  # Console's raw API requires UTF-8 regardless.
         raw = mock.Mock()
-        chunks = []
-
-        def write(data):
-            chunks.append(bytes(data[:1]))
-            return 1
-
-        raw.write.side_effect = write
+        raw.write.side_effect = lambda data: chunks.append(bytes(data[:1])) or 1
         with mock.patch.object(module.os, 'name', 'nt'), \
-             mock.patch.object(module, 'open', return_value=raw, create=True) as opened, \
-             mock.patch.object(module.os, 'write') as fd_write:
-            module._transport('aé中!', stream)
-        opened.assert_called_once_with(7, 'wb', buffering=0, closefd=False)
-        self.assertEqual(b''.join(chunks), 'aé中!'.encode('utf-8'))
-        raw.close.assert_called_once_with()
-        fd_write.assert_not_called()
-        stream.write.assert_not_called()
-        stream.flush.assert_not_called()
+             mock.patch.object(module, 'open', return_value=raw, create=True):
+            # Real dup is closed explicitly because this test replaces its raw owner.
+            with mock.patch.object(module.os, 'dup', return_value=77), \
+                 mock.patch.object(module.os, 'set_inheritable') as inherit:
+                sink = module._Sink(self.stdout)
+                sink.write('aé中!\n')
+                inherit.assert_called_once_with(77, False)
+        self.assertEqual(b''.join(chunks), 'aé中!\r\n'.encode('utf-8'))
+        destination = mock.Mock(encoding='utf-16-le')
+        destination.fileno.return_value = self.stdout.fileno()
+        with mock.patch.object(module.os, 'name', 'nt'):
+            sink = module._Sink(destination)
+            sink.write('é中\n')
+            sink.raw.close()
+        self.stdout.seek(0)
+        self.assertEqual(self.stdout.read(), 'é中\r\n'.encode('utf-16-le'))
 
-    def test_windows_redirected_file_preserves_stream_encoding_and_fd(self):
-        with tempfile.TemporaryFile(mode='w+b') as stream:
-            destination = mock.Mock()
-            destination.fileno.return_value = stream.fileno()
-            destination.encoding = 'utf-16-le'
-            with mock.patch.object(module.os, 'name', 'nt'):
-                module._transport('é中\n', destination)
-            os.fstat(stream.fileno())
-            stream.seek(0)
-            self.assertEqual(stream.read(), 'é中\r\n'.encode('utf-16-le'))
-
-    def test_transport_releases_wrapper_on_failure_without_closing_fd(self):
+    def test_raw_write_no_progress_fails_and_capture_failure_closes_duplicate(self):
+        sink = module._Sink(self.stdout)
+        self.addCleanup(sink.raw.close)
         for result in (0, None, OSError('broken sink')):
             with self.subTest(result=result):
                 raw = mock.Mock()
@@ -330,54 +315,36 @@ class ConsoleTest(unittest.TestCase):
                     raw.write.side_effect = result
                 else:
                     raw.write.return_value = result
-                stream = mock.Mock(encoding='utf-8')
-                with mock.patch.object(module.os, 'name', 'nt'), \
-                     mock.patch.object(module, 'open', return_value=raw, create=True), \
-                     mock.patch.object(module.os, 'close') as close:
+                with mock.patch.object(sink, 'raw', raw):
                     with self.assertRaises(OSError):
-                        module._transport('text', stream)
-                raw.close.assert_called_once_with()
-                close.assert_not_called()
+                        sink.write('text')
+        with mock.patch.object(module, 'open', side_effect=OSError('open failed'), create=True), \
+             mock.patch.object(module.os, 'close', wraps=os.close) as close:
+            with self.assertRaises(OSError):
+                module._Sink(self.stdout)
+            close.assert_called_once()
+            with self.assertRaises(OSError):
+                os.fstat(close.call_args.args[0])
 
-    def test_failed_summary_is_reported_after_recovery(self):
-        entered, release = threading.Event(), threading.Event()
-        output = []
-        failed = False
+    def test_failed_summary_is_not_replayed(self):
+        console, release, output = self.blocked()
+        original = module._Sink.write
+        attempts = []
 
-        def write(text):
-            nonlocal failed
-            if text == 'first':
-                entered.set()
-                release.wait(2)
-            if text.startswith('[console:') and not failed:
-                failed = True
-                raise OSError('temporary failure')
-            output.append(text)
+        def write(sink, text):
+            if text.startswith('[console:'):
+                attempts.append(text)
+                raise OSError('summary failed')
+            original(sink, text)
 
-        console = Console(write, max_messages=1)
-        self.addCleanup(lambda: console.close(1))
-        self.addCleanup(release.set)
-        console.emit('first')
-        self.assertTrue(entered.wait(1))
-        console.emit('next')
-        self.assertFalse(console.emit('dropped'))
-        release.set()
-        self.assertTrue(console.close(1))
-        self.assertEqual(output, ['first', 'next', '[console: dropped 1 diagnostics]\n'])
-        self.assertEqual(console.stats['failures'], 1)
-
-    def test_invalid_limits(self):
-        for limits in ({'max_messages': 0}, {'max_bytes': -1},
-                       {'max_line_bytes': 1.5}):
-            with self.assertRaises(ValueError):
-                Console(lambda text: None, **limits)
-
-    def test_unavailable_standard_stream_only_fails_delivery(self):
-        console = Console(module._standard_write)
-        with mock.patch.object(sys, 'stdout', None):
-            console.emit('lost')
+        with mock.patch.object(module._Sink, 'write', write):
+            for _ in range(128):
+                console.emit('queued')
+            self.assertFalse(console.emit('drop'))
+            release.set()
             self.assertTrue(console.close(1))
-        self.assertEqual(console.stats['failures'], 1)
+        self.assertEqual(attempts, ['[console: dropped 1 diagnostics]\n'])
+        self.assertEqual(len(output), 129)
 
     def test_lazy_singleton_and_shutdown_no_replacement(self):
         with mock.patch.object(module, '_console', None), \
@@ -394,7 +361,6 @@ class ConsoleTest(unittest.TestCase):
             self.assertTrue(module.shutdown(1))
             self.assertIs(module._get_console(), consoles[0])
             self.assertFalse(consoles[0].emit('closed'))
-
     @unittest.skipUnless(os.name == 'nt', 'Windows console API')
     def test_real_windows_console_unicode_readback(self):
         # A fresh, hidden console isolates code pages and screen contents from
@@ -405,6 +371,7 @@ from ctypes import wintypes
 import io
 import msvcrt
 import os
+import sys
 from serve import console
 
 class COORD(ctypes.Structure):
@@ -448,7 +415,7 @@ try:
 except BaseException:
     close(handle)
     raise
-# fd now owns handle; both the stream and borrowed transports use this handle.
+# fd owns the original handle; each diagnostic sink owns a duplicate.
 with os.fdopen(fd, 'w', encoding='utf-8') as stream:
     with open(fd, 'wb', buffering=0, closefd=False) as raw:
         assert not isinstance(raw, io.FileIO), type(raw)
@@ -456,9 +423,10 @@ with os.fdopen(fd, 'w', encoding='utf-8') as stream:
     for codepage in (437, 936):
         checked(set_cp(codepage))
         checked(cursor(handle, COORD(0, 0)))
-        console.console_print(expected, end='', file=stream)
-        assert console.wait_idle(2), 'console did not drain'
-        assert console._console.stats['failures'] == 0
+        writer = console.Console()
+        sys.stdout = stream
+        assert writer.emit(expected)
+        assert writer.close(2), 'console did not drain'
         # CJK glyphs occupy two screen cells; read beyond the text and strip
         # only the untouched trailing spaces in this fresh screen buffer.
         cells = len(expected) * 2
@@ -471,9 +439,9 @@ with os.fdopen(fd, 'w', encoding='utf-8') as stream:
         for start_row, use_transport in ((3, False), (7, True)):
             checked(cursor(handle, COORD(0, start_row)))
             if use_transport:
-                console.console_print('alpha\nbeta', end='', file=stream)
-                assert console.wait_idle(2), 'multiline output did not drain'
-                assert console._console.stats['failures'] == 0
+                writer = console.Console()
+                assert writer.emit('alpha\nbeta')
+                assert writer.close(2), 'multiline output did not drain'
             else:
                 stream.write('alpha\nbeta')
                 stream.flush()
@@ -488,6 +456,7 @@ with os.fdopen(fd, 'w', encoding='utf-8') as stream:
         expected_layout = (['alpha', 'beta'], 4, 1)
         assert layouts == [expected_layout, expected_layout], (codepage, layouts)
     assert console.shutdown(1)
+sys.stdout = sys.__stdout__
 print('console Unicode readback passed: CP437 and CP936; multiline matches TextIOWrapper, cursor=(4,1)')
 '''
         startup = subprocess.STARTUPINFO()
@@ -503,32 +472,10 @@ print('console Unicode readback passed: CP437 and CP936; multiline matches TextI
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
         self.assertIn(b'console Unicode readback passed: CP437 and CP936', result.stdout)
 
-    @unittest.skipUnless(hasattr(os, 'fork'), 'fork unavailable')
-    def test_fork_child_has_fresh_singleton(self):
-        script = r'''
-import os
-from serve import console
-parent = console._get_console()
-pid = os.fork()
-if pid == 0:
-    child = console._get_console()
-    valid = child is not parent and child._worker.is_alive()
-    valid = console.shutdown(1) and valid
-    os._exit(0 if valid else 1)
-_, status = os.waitpid(pid, 0)
-assert status == 0
-assert console._get_console() is parent
-assert console.shutdown(1)
-'''
-        result = subprocess.run([sys.executable, '-c', script],
-                                cwd=Path(__file__).resolve().parents[1],
-                                capture_output=True, timeout=5)
-        self.assertEqual(result.returncode, 0, result.stderr.decode())
-
     @unittest.skipUnless(os.name == 'posix', 'POSIX pipe saturation')
     def test_real_full_pipe_subprocess_exits(self):
         script = r'''
-import os, threading
+import os, sys, threading
 from serve import console
 r, w = os.pipe()
 os.set_blocking(w, False)
@@ -541,11 +488,11 @@ os.set_blocking(w, True)
 os.dup2(w, 1)
 os.close(w)
 entered = threading.Event()
-original = os.write
-def write(fd, data):
+original = console._Sink.write
+def write(sink, text):
     entered.set()
-    return original(fd, data)
-os.write = write
+    return original(sink, text)
+console._Sink.write = write
 console.console_print('blocked diagnostic')
 assert entered.wait(1)
 assert not console.shutdown(.02)

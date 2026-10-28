@@ -1,29 +1,31 @@
-"""Synchronous diagnostic recording for formatting/state unit tests.
-
-Output isolation and writer behavior use the real Console in dedicated tests.
-"""
+"""Real diagnostic writers with bounded completion for integration tests."""
 import contextlib
-import sys
+import tempfile
 from unittest import mock
 from serve import console
 
 
 @contextlib.contextmanager
 def capture_console(stream):
-    class Recorder:
-        def _emit(self, text, progress_key=None, destination=None):
-            if isinstance(destination, tuple):
-                destination = destination[1]
-            target = stream if destination is None or destination == 'stdout' else destination
-            if target == 'stderr':
-                target = sys.stderr
-            target.write(text)
-            return True
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as destination:
+        writer = console.Console()
+        with contextlib.redirect_stdout(destination), mock.patch.object(console, "_console", writer):
+            try:
+                yield stream
+            finally:
+                if not writer.close(2):
+                    raise AssertionError("diagnostic writer did not finish captured output")
+                destination.flush()
+                destination.seek(0)
+                stream.write(destination.read())
 
-        emit = _emit
 
-        def discard_progress(self, key):
-            pass
-
-    with contextlib.redirect_stdout(stream), mock.patch.object(console, '_console', Recorder()):
-        yield stream
+@contextlib.contextmanager
+def blocked_console(writer, write):
+    """Inject blocking only at the same sink write boundary used in production."""
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as destination, \
+            contextlib.redirect_stdout(destination), \
+            mock.patch.object(console._Sink, "write", autospec=True,
+                              side_effect=lambda sink, text: write(text)), \
+            mock.patch.object(console, "_console", writer):
+        yield

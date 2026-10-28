@@ -59,7 +59,7 @@ def session_file(service, action, path, refused_type):
                 return False
 
         console_print('[strata] SAVE waiting for RAM after cache reclaim: '
-              f'need={required_mib(error)} MiB, limit={SETTLE_SECONDS:g}s; floor unchanged', flush=True)
+              f'need={required_mib(error)} MiB, limit={SETTLE_SECONDS:g}s; floor unchanged')
         for attempt in range(MAX_RETRIES):
             while True:
                 if not same_process() or time.monotonic() >= deadline:

@@ -7,7 +7,6 @@ silently retried or returned as successful structured output.
 json_schema is checked against its schema when the package is installed - without it, only that the answer is one
 JSON object, and the server says so once.
 """
-
 import json
 import threading
 
@@ -89,8 +88,7 @@ def jsonschema_modules():
             except ImportError:
                 _jsonschema = False
                 console_print('[strata] response_format json_schema: the Python package jsonschema is not installed, so '
-                      'answers are only checked to be one JSON object (python -m pip install "jsonschema>=4.23,<5")',
-                      flush=True)
+                      'answers are only checked to be one JSON object (python -m pip install "jsonschema>=4.23,<5")')
         return _jsonschema or None
 
 
@@ -261,7 +259,7 @@ def validated_json(text, validator, finish):
                 value = json.loads(repair_latex_escapes(extract_json(text)), object_pairs_hook=pairs,
                                    parse_constant=constant)
                 canonical = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
-                console_print("[strata] structured output: repaired backslashes that were not valid JSON escapes", flush=True)
+                console_print("[strata] structured output: repaired backslashes that were not valid JSON escapes")
             except (ValueError, TypeError):
                 value = None
         if value is None:

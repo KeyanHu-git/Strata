@@ -1,4 +1,5 @@
 """Blocked request diagnostics do not own inference resources (#4479)."""
+import contextlib
 import json
 import threading
 import time
@@ -11,13 +12,52 @@ from unittest import mock
 from pathlib import Path
 
 from serve import console
+from serve.test_console_support import blocked_console
 from serve.frontend import ChatTemplate
-from serve.server import ByteTokenizer, MockEngine, Service, serve
+from serve.server import ByteTokenizer, GpuBusy, MockEngine, Server, Service, serve
 
 ROOT = Path(__file__).parent
 
 
 class RequestOutputIsolation(unittest.TestCase):
+    def test_server_error_preserves_peer_in_one_record_and_suppresses_disconnect(self):
+        peer = ("127.0.0.1", 43210)
+        server = object.__new__(Server)
+        real_write = console._Sink.write
+        for error in (ValueError("injected handler failure"), ConnectionResetError("peer left")):
+            with self.subTest(error=type(error).__name__), \
+                    tempfile.TemporaryFile(mode="w+", encoding="utf-8") as destination:
+                records = []
+                writer = console.Console()
+
+                def write(sink, text):
+                    records.append(text)
+                    return real_write(sink, text)
+
+                with contextlib.redirect_stderr(destination), \
+                        mock.patch.object(console, "_console", writer), \
+                        mock.patch.object(console._Sink, "write", autospec=True, side_effect=write):
+                    try:
+                        try:
+                            raise error
+                        except Exception:
+                            server.handle_error(None, peer)
+                    finally:
+                        self.assertTrue(writer.close(2), "error output did not finish")
+                destination.seek(0)
+                output = destination.read()
+                if isinstance(error, ConnectionError):
+                    self.assertEqual(records, [])
+                    self.assertEqual(output, "")
+                else:
+                    self.assertEqual(len(records), 1)
+                    self.assertEqual(output, records[0])
+                    self.assertIn(f"Exception occurred during processing of request from {peer}\n", output)
+                    self.assertIn("Traceback (most recent call last):", output)
+                    self.assertIn("ValueError: injected handler failure", output)
+                    self.assertTrue(output.startswith("-" * 40 + "\n"))
+                    self.assertTrue(output.endswith("-" * 40 + "\n"))
+
     def test_cancel_during_prompt_and_decode_progress(self):
         for phase in ("prompt", "decode"):
             with self.subTest(phase=phase):
@@ -52,7 +92,7 @@ class RequestOutputIsolation(unittest.TestCase):
                 engine = Engine(tok, "</think>\n\n" + "answer " * 100, max_context=4096)
                 engine.delay = 0.005
                 svc = Service(engine, tok, ChatTemplate(ROOT / "chat_template.jinja"))
-                output = console.Console(write)
+                output = console.Console()
 
                 def run(event):
                     try:
@@ -62,7 +102,7 @@ class RequestOutputIsolation(unittest.TestCase):
 
                 first = threading.Thread(target=run, args=(cancel,), daemon=True)
                 second = threading.Thread(target=run, args=(threading.Event(),), daemon=True)
-                with mock.patch.object(console, "_console", output):
+                with blocked_console(output, write):
                     first.start()
                     try:
                         self.assertTrue(blocked.wait(3))
@@ -97,7 +137,7 @@ class RequestOutputIsolation(unittest.TestCase):
         svc = Service(MockEngine(tok, "</think>\n\nok", max_context=4096), tok,
                       ChatTemplate(ROOT / "chat_template.jinja"))
         svc.max_queue = 0
-        output = console.Console(write)
+        output = console.Console()
         httpd = serve(svc, port=0)
 
         def request():
@@ -111,7 +151,7 @@ class RequestOutputIsolation(unittest.TestCase):
                 return response.status
 
         try:
-            with mock.patch.object(console, "_console", output):
+            with blocked_console(output, write):
                 self.assertEqual(request(), 200)
                 self.assertTrue(blocked.wait(2))
                 self.assertEqual(svc.wait_for_drain(1), 0)
@@ -135,11 +175,11 @@ class RequestOutputIsolation(unittest.TestCase):
             blocked.set()
             resume.wait(5)
 
-        output = console.Console(write)
+        output = console.Console()
         svc.before_load = [sys.executable, "-c", "import sys; sys.stdout.write('hook output ' * 100000)"]
         svc.before_load_timeout_s = 2
         svc.before_load_strict = True
-        with mock.patch.object(console, "_console", output):
+        with blocked_console(output, write):
             try:
                 svc.unload()
                 self.assertTrue(blocked.wait(2))
@@ -160,11 +200,17 @@ class RequestOutputIsolation(unittest.TestCase):
 
     def test_http_and_process_exit_with_unread_stdout_pipe(self):
         code = r"""
-import json,sys,time,urllib.request
+import json,sys,time,threading,urllib.request
 from pathlib import Path
 from serve.console import console_print
 from serve.frontend import ChatTemplate
 from serve.server import Service,MockEngine,ByteTokenizer,serve
+from serve.telemetry import Telemetry
+sampled=threading.Event()
+def fail_sample(self):
+    sampled.set()
+    raise RuntimeError('injected sampler failure')
+Telemetry.sample=fail_sample
 for _ in range(8):
     for _ in range(64): console_print('x'*4090)
     time.sleep(.02)
@@ -172,6 +218,7 @@ tok=ByteTokenizer()
 svc=Service(MockEngine(tok,'</think>\n\nok',max_context=4096),tok,ChatTemplate('serve/chat_template.jinja'))
 svc.max_queue=0
 server=serve(svc,port=0)
+assert sampled.wait(2), 'actual sampler did not attempt a sample'
 results=[]
 try:
     for _ in range(2):
@@ -183,6 +230,8 @@ try:
         assert svc.wait_for_drain(1)==0
 finally:
     server.shutdown();server.server_close()
+    svc.telemetry._thread.join(1)
+    assert not svc.telemetry._thread.is_alive(), 'sampler failure diagnostic blocked shutdown'
 Path(sys.argv[1]).write_text(json.dumps(results))
 """
         with tempfile.TemporaryDirectory() as directory:
@@ -206,12 +255,16 @@ Path(sys.argv[1]).write_text(json.dumps(results))
     def test_hook_capture_failure_does_not_change_hook_result(self):
         from serve.test_server import UnloadableEngine
         real_file = tempfile.TemporaryFile
-        for failure in ("create", "close"):
-            with self.subTest(failure=failure):
+        for failure, outcome in ((f, o) for f in ("create", "read", "close")
+                                 for o in ("success", "failure", "timeout")):
+            with self.subTest(failure=failure, outcome=outcome):
                 tok = ByteTokenizer()
                 engine = UnloadableEngine(tok, "</think>\n\nok", max_context=4096)
                 svc = Service(engine, tok, ChatTemplate(ROOT / "chat_template.jinja"))
-                svc.before_load = [sys.executable, "-c", "pass"]
+                script = {"success": "pass", "failure": "import sys; sys.exit(7)",
+                          "timeout": "import time; time.sleep(2)"}[outcome]
+                svc.before_load = [sys.executable, "-c", script]
+                svc.before_load_timeout_s = 0.1 if outcome == "timeout" else 2
                 svc.before_load_strict = True
                 svc.unload()
 
@@ -222,14 +275,24 @@ Path(sys.argv[1]).write_text(json.dumps(results))
                     class ClosingFile:
                         def __getattr__(self, name):
                             return getattr(file, name)
+                        def read(self, *args):
+                            if failure == "read":
+                                raise OSError("injected read failure")
+                            return file.read(*args)
                         def close(self):
                             file.close()
-                            raise OSError("injected close failure")
+                            if failure == "close":
+                                raise OSError("injected close failure")
                     return ClosingFile()
 
                 with mock.patch("serve.server.tempfile.TemporaryFile", side_effect=temporary):
-                    svc.load()
-                self.assertTrue(engine.alive())
+                    if outcome == "success":
+                        svc.load()
+                    else:
+                        reason = "exited with code 7" if outcome == "failure" else "did not finish"
+                        with self.assertRaisesRegex(GpuBusy, reason):
+                            svc.load()
+                self.assertEqual(engine.alive(), outcome == "success")
 
 
 if __name__ == "__main__":

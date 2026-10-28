@@ -841,7 +841,7 @@ def forced_call(tool_choice, tools: list[dict] | None) -> str | None:
     if kind == "named" and name in names:
         return CALL_START + f"\n<function={name}>\n"
     console_print(f"[strata] tool_choice {json.dumps(tool_choice)[:200]} is not supported here (or names no tool of the "
-          "request): the model decides, as with \"auto\"", flush=True)
+          "request): the model decides, as with \"auto\"")
     return None
 
 

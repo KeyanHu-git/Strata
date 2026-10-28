@@ -657,7 +657,7 @@ class Telemetry:
                 s = self.sample()
             except Exception as e:                    # noqa: BLE001 - a monitor must outlive its source
                 if not complained:                    # once, not once a second
-                    console_print(f"[strata] metrics: a sample failed ({e}); the sampler keeps trying", flush=True)
+                    console_print(f"[strata] metrics: a sample failed ({e}); the sampler keeps trying")
                     complained = True
                 self._stop.wait(1.0)
                 continue

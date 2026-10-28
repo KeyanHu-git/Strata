@@ -1,43 +1,39 @@
 # Console diagnostics
 
-Serving publishes console diagnostics to one process-owned writer. A paused
-terminal or a full output pipe does not make request execution wait for a
-progress line, completion message or error diagnostic. Engine protocol traffic,
-HTTP responses and model tokens use their existing channels. The human-readable
-`ready:` banner is best-effort; automation should use the ready file, structured
-lifecycle events or HTTP readiness checks.
+Request execution, recovery and shutdown publish diagnostics to one process-owned
+writer. A paused terminal or full output pipe does not make those operations wait
+for a diagnostic write. Configuration helpers retain synchronous output so their
+callers can capture notes immediately. Engine protocol traffic, HTTP responses,
+model tokens and structured lifecycle events keep their existing channels. The
+human-readable ready banner is best-effort; automation should use the ready file,
+structured lifecycle events or HTTP readiness checks.
 
-The writer has at most 128 pending records and 64 KiB of pending UTF-8 text,
-plus one record being written. Each record is limited to 4 KiB. Long messages
-end with a truncation marker. These limits apply to queued diagnostics, not to
-request data or engine log files.
+The writer keeps at most 128 pending records and 64 KiB of pending UTF-8 text,
+plus one record being written. Each record is limited to 4 KiB. Longer messages
+end with a truncation marker. Progress keeps only the latest pending sample;
+request cleanup removes its own sample. A line already being written can still
+appear after that request ends. When the queue is full, new diagnostics are
+dropped. An overflow count is reported best-effort when output resumes.
 
-Progress keeps only the latest pending sample. Ending a request removes its
-pending sample without removing another request's sample. A line already being
-written can appear after the request ends. Under sustained output backpressure,
-new diagnostics that do not fit are dropped; after output resumes, the writer
-reports the dropped count. A failed standard output channel is disabled for the
-rest of the process. Console output is therefore best-effort, not an audit log.
+Each standard output destination is held through an independent, non-inheritable
+file descriptor. Queued records retain their destination until consumed or
+discarded, so closing the original stream does not redirect delayed writes to a
+reused descriptor. The two current destinations are cached by stream identity;
+stable stdout/stderr need at most two owned descriptors. Replacing a destination
+does not close one still retained by queued output. A failed destination does not
+disable a later healthy destination.
 
-For stdout/stderr with file descriptors, the writer borrows the descriptor
-and uses unbuffered writes. Windows console handles retain Python's Unicode
-console conversion. The writer does not hold Python's buffered-stream lock
-during a blocked write. Callers must keep the stream and descriptor open until
-their diagnostics have drained. FD-backed output uses platform-default newline
-conversion, including LF-to-CRLF on Windows; custom stream newline settings are
-not inferred. Shutdown waits at most 0.2 seconds for diagnostics; pending lines can be
-lost on exit. Embedded applications supplying custom buffered streams need to
-keep those streams open until drained; their shutdown behavior depends on the
-custom stream.
+The writer uses unbuffered output, preserving Windows console Unicode and
+platform-default newlines. It does not hold Python's standard buffered-stream
+lock during writes. Shutdown waits at most 0.2 seconds for the writer; remaining
+diagnostics may be lost. Cached destinations can stay open until replaced or the
+writer exits. Custom stream modes and in-place descriptor rebinding are outside
+this internal stdout/stderr interface.
 
-`before_load` hooks keep their existing exit-code and timeout behavior. Their
-stdout/stderr go to a temporary file so they do not inherit a blocked terminal.
-Only the last 3072 bytes are submitted after the hook finishes or times out.
-The spool's disk size depends on the hook's output. Capture failures discard
-that output without changing the hook's result. Hooks now see a file rather than
-a terminal on stdout/stderr.
+`before_load` output goes to a temporary file, and its last 3072 bytes are
+submitted when the hook ends. Its exit-code, timeout and strict-mode policy stay
+the same. Capture failures do not replace the hook outcome. The temporary file
+can grow with the hook's output, and hooks see a file on stdout/stderr.
 
-The normal queue and progress API never waits for actual output. The explicit
-`wait_idle` and `close` methods are for bounded draining and tests, not the
-request path. Configured third-party logging handlers and commands that open
-the console themselves are separate output paths.
+Configured third-party logging handlers and commands opening their own console
+remain separate output paths.

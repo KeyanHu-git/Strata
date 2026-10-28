@@ -4,7 +4,6 @@
 """
 from __future__ import annotations
 
-
 import contextlib
 import io
 import json
@@ -912,7 +911,7 @@ class EffortAtTheEnd(unittest.TestCase):
             new.write_bytes(b"...  --tail-role-token ID --serve: ...")
             old.write_bytes(b"... --turn-token ID ...")
             out = io.StringIO()
-            with capture_console(out):
+            with contextlib.redirect_stdout(out):
                 self.assertIsNone(effort_end_args({}, str(new), Tok()))
                 self.assertIsNone(effort_end_args({"effort_position": "start"}, str(new), Tok()))
                 self.assertEqual(effort_end_args({"effort_position": "end"}, str(new), Tok()),
@@ -1911,7 +1910,7 @@ class GpuChoice(unittest.TestCase):
             probe.write_text("")
             cfg = {"backend": "hip", "exe": str(exe), "args": []}
             done = SimpleNamespace(returncode=0, stdout=self.DEVICES_MINI_PC)
-            with mock.patch("serve.server.subprocess.run", return_value=done) as run, capture_console(io.StringIO()) as out:
+            with mock.patch("serve.server.subprocess.run", return_value=done) as run, contextlib.redirect_stdout(io.StringIO()) as out:
                 self.assertEqual(hip_auto_devices(cfg, {}), [1])
                 self.assertEqual(run.call_args[0][0], [str(probe), "--list-devices"])
                 self.assertIn("automatic GPU choice: GPU 1", out.getvalue())
@@ -3242,12 +3241,12 @@ class ConfigReasoningEffort(unittest.TestCase):
         from serve.server import lift_reasoning_effort_arg
         for args in (["--ctx", "4096", "--reasoning-effort", "low"], ["--reasoning-effort=low", "--ctx", "4096"]):
             cfg = {"args": args}
-            with mock.patch("serve.server.console_print"):
+            with mock.patch("builtins.print"):
                 lift_reasoning_effort_arg(cfg)
             self.assertEqual(cfg["args"], ["--ctx", "4096"])
             self.assertEqual(cfg["reasoning_effort"], "low")
         cfg = {"args": ["--reasoning-effort", "low"], "reasoning_effort": "none"}
-        with mock.patch("serve.server.console_print"):
+        with mock.patch("builtins.print"):
             lift_reasoning_effort_arg(cfg)
         self.assertEqual((cfg["args"], cfg["reasoning_effort"]), ([], "none"))      # the key wins
         cfg = {"args": ["--ctx", "4096"]}
@@ -3261,7 +3260,7 @@ class JoinedEngineArgs(unittest.TestCase):
     def split(self, args):
         from serve.server import split_joined_args
         cfg = {"args": list(args)}
-        with mock.patch("serve.server.console_print") as pr:
+        with mock.patch("builtins.print") as pr:
             split_joined_args(cfg)
         return cfg["args"], pr.called
 
@@ -4348,10 +4347,9 @@ class ThinkingBudget(unittest.TestCase):
         st = {"phase": "thinking", "generated": 10, "first_token": time.time() - 1, "started": time.time() - 2,
               "max_tokens": 6400, "thinking_budget": 2048}
         out = io.StringIO()
-        with capture_console(out):
-            self.svc._progress(0, st=st)
-            self.svc._progress(0, st={**st, "phase": "answering"})
-            self.svc._progress(0, st={**st, "thinking_budget": None})
+        for state in (st, {**st, "phase": "answering"}, {**st, "thinking_budget": None}):
+            with capture_console(out):
+                self.svc._progress(0, st=state, progress_key=object())
         lines = out.getvalue().splitlines()
         self.assertIn("thinking: 10 of budget 2048 (max 6400) tokens", lines[0])
         self.assertIn("answering: 10 of max 6400 tokens", lines[1])
@@ -5984,7 +5982,7 @@ class BudgetOverRam(unittest.TestCase):
         import serve.server as S
         vm = SimpleNamespace(total=total * 2**30, available=free * 2**30)
         fake = SimpleNamespace(virtual_memory=lambda: vm)
-        with mock.patch.dict(sys.modules, {"psutil": fake}), capture_console(io.StringIO()):
+        with mock.patch.dict(sys.modules, {"psutil": fake}), contextlib.redirect_stdout(io.StringIO()):
             return S.warn_budget_over_ram(["--native", "x", "--resident-budget-gib", str(budget)])
 
     def test_over_free_ram_warns(self):
