@@ -1,0 +1,13 @@
+{
+  "source": "3d502f474a0842f92827f620fd026be23f870657",
+  "engine_builds": {
+    "CUDA sm_120": 0,
+    "HIP gfx1100": 0,
+    "SYCL": 0,
+    "Metal": 0
+  },
+  "CUDA_ctest": "2/2 cache and session-save passed",
+  "HIP_tests": "cache and session-save passed",
+  "model_execution": "HIP only, upstream/fixed/fixed-async, 15 requests each",
+  "remaining_windows_engines": []
+}

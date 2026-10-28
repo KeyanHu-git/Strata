@@ -1,0 +1,22 @@
+{
+  "source": "3d502f474a0842f92827f620fd026be23f870657",
+  "compiler": "Apple Clang",
+  "flags": [
+    "-std=c++20",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-fsanitize=address,undefined"
+  ],
+  "conversation_cache_checks": 45257,
+  "conversation_file_checks": 198,
+  "session_save_reclaim_checks": 161,
+  "conversation_memory_checks": 31,
+  "split_allocation_failure_cases": [
+    8,
+    12,
+    16
+  ],
+  "standalone_assignment_control": "prior implementation: ASan heap-use-after-free; candidate: joined=7",
+  "qualification": "file/session/split used isolated candidate header with identical definitions; final header adds copy precondition comments"
+}

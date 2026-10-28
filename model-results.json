@@ -1,0 +1,736 @@
+{
+  "completed": true,
+  "stage": "finished",
+  "started": 1793188513.4781024,
+  "tests": [
+    {
+      "name": "build-driver",
+      "exit_code": 0
+    },
+    {
+      "name": "conversation_cache_test",
+      "exit_code": 0
+    },
+    {
+      "name": "session_save_reclaim_test",
+      "exit_code": 0
+    },
+    {
+      "name": "upstream",
+      "exit_code": 0
+    },
+    {
+      "name": "fixed",
+      "exit_code": 0
+    },
+    {
+      "name": "fixed-async",
+      "exit_code": 0
+    }
+  ],
+  "arms": [
+    {
+      "label": "upstream",
+      "binary_sha256": "7ed9c1b0eb4e3d4337e21307409c7ed934071a65d7b1df5c80867b56238da341",
+      "settings": {
+        "args": [
+          "--pack",
+          "<PACK>",
+          "--native",
+          "<NATIVE>",
+          "--ple-gguf",
+          "<PLE_GGUF>",
+          "--expert-profile",
+          "<EXPERT_PROFILE>",
+          "--expert-cache",
+          "4416",
+          "--prefill",
+          "auto",
+          "--spec",
+          "6",
+          "--spec-min-p",
+          "0.5",
+          "--mtp",
+          "<MTP>",
+          "--max-context",
+          "131072",
+          "--kv",
+          "int8",
+          "--resident-experts",
+          "--mtp-max-t",
+          "4",
+          "--suffix-draft",
+          "3",
+          "--lookup-chain",
+          "0",
+          "--conversation-cache-mib",
+          "4096",
+          "--conversation-cache-slots",
+          "3",
+          "--prompt-cache",
+          "6",
+          "--prompt-cache-every",
+          "16384",
+          "--pcie-frac",
+          "0",
+          "--adapt-swaps",
+          "0",
+          "--resident-budget-gib",
+          "8"
+        ],
+        "env": {
+          "HIP_VISIBLE_DEVICES": "1",
+          "STRATA_HIPBLASLT_TUNING": "<HIP_TUNING_FILE>",
+          "STRATA_RESIDENT_PIN": "0",
+          "STRATA_SPEC_PROB": "1",
+          "STRATA_SPEC_PROB_GATE": "pick",
+          "STRATA_IQ_MT_MIN": "1",
+          "STRATA_SNAPSHOT_VERIFY": "1"
+        }
+      },
+      "requests": [
+        {
+          "output_ids": [
+            588,
+            248046
+          ],
+          "produced": 2,
+          "prompt_read": 213,
+          "raw_done": "DONE 2 213 3129.6 186.1 stop 2 3 0 1265 2400 646 120 109.2 213 0 chunk=196 experts_streamed=3476"
+        },
+        {
+          "output_ids": [
+            19186,
+            248046
+          ],
+          "produced": 2,
+          "prompt_read": 17,
+          "raw_done": "DONE 2 213 271.6 134.5 stop 2 3 196 1287 2400 652 121 31.7 17 0 chunk=0 experts_streamed=0"
+        },
+        {
+          "output_ids": [
+            44061,
+            248046
+          ],
+          "produced": 2,
+          "prompt_read": 1385,
+          "raw_done": "DONE 2 1581 4061.5 144.4 stop 2 3 196 1335 2400 597 108 83.5 1385 0 chunk=1378 experts_streamed=7012"
+        },
+        {
+          "output_ids": [
+            85,
+            29899,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 252,
+          "raw_done": "DONE 3 1836 2911.2 222.5 stop 3 3 1584 1211 2400 700 185 199.4 252 0 chunk=245 experts_streamed=3690"
+        },
+        {
+          "output_ids": [
+            14778,
+            248046
+          ],
+          "produced": 2,
+          "prompt_read": 262,
+          "raw_done": "DONE 2 1836 3104.4 215.0 stop 2 3 1574 1212 2400 709 143 132.4 262 0 chunk=255 experts_streamed=3810"
+        },
+        {
+          "output_ids": [
+            1931,
+            277,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 262,
+          "raw_done": "DONE 3 1836 3128.6 250.5 stop 3 3 1574 1169 2400 710 206 232.1 262 0 chunk=255 experts_streamed=3819"
+        },
+        {
+          "output_ids": [
+            273,
+            1588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 262,
+          "raw_done": "DONE 3 1836 3139.9 241.0 stop 3 3 1574 1156 2400 706 199 232.1 262 0 chunk=255 experts_streamed=3789"
+        },
+        {
+          "output_ids": [
+            5816,
+            278,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 262,
+          "raw_done": "DONE 3 1836 3033.0 250.3 stop 3 3 1574 1161 2400 707 191 237.4 262 0 chunk=255 experts_streamed=3783"
+        },
+        {
+          "output_ids": [
+            474,
+            7588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 284,
+          "raw_done": "DONE 3 1858 3090.3 248.5 stop 3 3 1574 1157 2400 701 200 247.1 284 0 chunk=277 experts_streamed=3901"
+        },
+        {
+          "output_ids": [
+            273,
+            1588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 289,
+          "raw_done": "DONE 3 1863 3345.4 254.7 stop 3 3 1574 1138 2400 677 241 241.4 289 0 chunk=282 experts_streamed=3960"
+        },
+        {
+          "output_ids": [
+            5816,
+            278,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 289,
+          "raw_done": "DONE 3 1863 3299.8 281.1 stop 3 3 1574 1140 2400 694 234 247.4 289 0 chunk=282 experts_streamed=3917"
+        },
+        {
+          "output_ids": [
+            474,
+            7588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 311,
+          "raw_done": "DONE 3 1885 3345.5 244.4 stop 3 3 1574 1146 2400 693 224 237.0 311 0 chunk=304 experts_streamed=3998"
+        },
+        {
+          "output_ids": [
+            273,
+            1588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 289,
+          "raw_done": "DONE 3 1863 3286.3 245.2 stop 3 3 1574 1138 2400 677 241 241.4 289 0 chunk=282 experts_streamed=3960"
+        },
+        {
+          "output_ids": [
+            5816,
+            278,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 289,
+          "raw_done": "DONE 3 1863 3208.0 250.1 stop 3 3 1574 1140 2400 694 234 247.4 289 0 chunk=282 experts_streamed=3917"
+        },
+        {
+          "output_ids": [
+            474,
+            7588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 311,
+          "raw_done": "DONE 3 1885 3341.6 250.1 stop 3 3 1574 1146 2400 693 224 237.0 311 0 chunk=304 experts_streamed=3998"
+        }
+      ],
+      "parking_refusals": 8,
+      "restores": 0,
+      "revisit_prompt_read": 1778,
+      "cache_lines": [
+        "strata hc: CUDA0: the hyper-connection read runs as staged (the norm per token and stream, the down projection's activations staged ahead by cp.async); checked bit for bit against the plain read on this card (STRATA_HC_SPLIT=1 or 0 for the earlier ones)",
+        "strata serve: conversation cache: parked 1840 tokens in 86.0 ms; parked=1 bytes=500371716 evictions=0 snapshot_bytes=500371716 reused_kv_bytes=0",
+        "strata serve: conversation cache: parked 1839 tokens in 89.1 ms; parked=2 bytes=1000737284 evictions=0 snapshot_bytes=500365568 reused_kv_bytes=0",
+        "strata serve: conversation cache: parked 1840 tokens in 101.2 ms; parked=3 bytes=1501109000 evictions=0 snapshot_bytes=500371716 reused_kv_bytes=0",
+        "strata serve: conversation cache: skip parking (snapshot 477 MiB exceeds available budget)",
+        "strata serve: conversation cache: skip parking (snapshot 477 MiB exceeds available budget)",
+        "strata serve: conversation cache: skip parking (snapshot 477 MiB exceeds available budget)",
+        "strata serve: conversation cache: skip parking (snapshot 477 MiB exceeds available budget)",
+        "strata serve: conversation cache: skip parking (snapshot 477 MiB exceeds available budget)",
+        "strata serve: conversation cache: skip parking (snapshot 477 MiB exceeds available budget)",
+        "strata serve: conversation cache: skip parking (snapshot 477 MiB exceeds available budget)",
+        "strata serve: conversation cache: skip parking (snapshot 477 MiB exceeds available budget)"
+      ]
+    },
+    {
+      "label": "fixed",
+      "binary_sha256": "0df1b29a71a91e75ed59b54da200d82cd29d2205baebcd6171d9934f3890cf41",
+      "settings": {
+        "args": [
+          "--pack",
+          "<PACK>",
+          "--native",
+          "<NATIVE>",
+          "--ple-gguf",
+          "<PLE_GGUF>",
+          "--expert-profile",
+          "<EXPERT_PROFILE>",
+          "--expert-cache",
+          "4416",
+          "--prefill",
+          "auto",
+          "--spec",
+          "6",
+          "--spec-min-p",
+          "0.5",
+          "--mtp",
+          "<MTP>",
+          "--max-context",
+          "131072",
+          "--kv",
+          "int8",
+          "--resident-experts",
+          "--mtp-max-t",
+          "4",
+          "--suffix-draft",
+          "3",
+          "--lookup-chain",
+          "0",
+          "--conversation-cache-mib",
+          "4096",
+          "--conversation-cache-slots",
+          "3",
+          "--prompt-cache",
+          "6",
+          "--prompt-cache-every",
+          "16384",
+          "--pcie-frac",
+          "0",
+          "--adapt-swaps",
+          "0",
+          "--resident-budget-gib",
+          "8"
+        ],
+        "env": {
+          "HIP_VISIBLE_DEVICES": "1",
+          "STRATA_HIPBLASLT_TUNING": "<HIP_TUNING_FILE>",
+          "STRATA_RESIDENT_PIN": "0",
+          "STRATA_SPEC_PROB": "1",
+          "STRATA_SPEC_PROB_GATE": "pick",
+          "STRATA_IQ_MT_MIN": "1",
+          "STRATA_SNAPSHOT_VERIFY": "1"
+        }
+      },
+      "requests": [
+        {
+          "output_ids": [
+            588,
+            248046
+          ],
+          "produced": 2,
+          "prompt_read": 213,
+          "raw_done": "DONE 2 213 3105.5 185.0 stop 2 3 0 1265 2400 646 120 109.2 213 0 chunk=196 experts_streamed=3476"
+        },
+        {
+          "output_ids": [
+            19186,
+            248046
+          ],
+          "produced": 2,
+          "prompt_read": 17,
+          "raw_done": "DONE 2 213 251.7 120.9 stop 2 3 196 1287 2400 652 121 31.7 17 0 chunk=0 experts_streamed=0"
+        },
+        {
+          "output_ids": [
+            44061,
+            248046
+          ],
+          "produced": 2,
+          "prompt_read": 1385,
+          "raw_done": "DONE 2 1581 4159.8 147.2 stop 2 3 196 1335 2400 597 108 83.5 1385 0 chunk=1378 experts_streamed=7012"
+        },
+        {
+          "output_ids": [
+            85,
+            29899,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 252,
+          "raw_done": "DONE 3 1836 2920.2 221.2 stop 3 3 1584 1211 2400 700 185 199.4 252 0 chunk=245 experts_streamed=3690"
+        },
+        {
+          "output_ids": [
+            14778,
+            248046
+          ],
+          "produced": 2,
+          "prompt_read": 262,
+          "raw_done": "DONE 2 1836 3128.8 207.4 stop 2 3 1574 1212 2400 709 143 132.4 262 0 chunk=255 experts_streamed=3810"
+        },
+        {
+          "output_ids": [
+            1931,
+            277,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 262,
+          "raw_done": "DONE 3 1836 3172.6 246.8 stop 3 3 1574 1169 2400 710 206 232.1 262 0 chunk=255 experts_streamed=3819"
+        },
+        {
+          "output_ids": [
+            273,
+            1588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 262,
+          "raw_done": "DONE 3 1836 3095.2 257.8 stop 3 3 1574 1156 2400 706 199 232.1 262 0 chunk=255 experts_streamed=3789"
+        },
+        {
+          "output_ids": [
+            5816,
+            278,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 262,
+          "raw_done": "DONE 3 1836 3095.0 245.0 stop 3 3 1574 1161 2400 707 191 237.4 262 0 chunk=255 experts_streamed=3783"
+        },
+        {
+          "output_ids": [
+            474,
+            7588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 284,
+          "raw_done": "DONE 3 1858 3267.8 258.3 stop 3 3 1574 1157 2400 701 200 247.1 284 0 chunk=277 experts_streamed=3901"
+        },
+        {
+          "output_ids": [
+            273,
+            1588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 23,
+          "raw_done": "DONE 3 1863 673.1 237.2 stop 3 3 1840 1144 2400 670 238 232.6 23 0 chunk=0 experts_streamed=0"
+        },
+        {
+          "output_ids": [
+            5816,
+            278,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 23,
+          "raw_done": "DONE 3 1863 693.6 237.5 stop 3 3 1840 1145 2400 693 227 225.6 23 0 chunk=0 experts_streamed=0"
+        },
+        {
+          "output_ids": [
+            474,
+            7588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 23,
+          "raw_done": "DONE 3 1885 674.6 243.1 stop 3 3 1862 1148 2400 689 220 218.9 23 0 chunk=0 experts_streamed=0"
+        },
+        {
+          "output_ids": [
+            273,
+            1588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 7,
+          "raw_done": "DONE 3 1863 414.4 254.0 stop 3 3 1856 1144 2400 670 238 239.4 7 0 chunk=0 experts_streamed=0"
+        },
+        {
+          "output_ids": [
+            5816,
+            278,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 7,
+          "raw_done": "DONE 3 1863 408.1 252.7 stop 3 3 1856 1145 2400 693 227 227.8 7 0 chunk=0 experts_streamed=0"
+        },
+        {
+          "output_ids": [
+            474,
+            7588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 7,
+          "raw_done": "DONE 3 1885 363.7 244.4 stop 3 3 1878 1148 2400 689 220 226.7 7 0 chunk=0 experts_streamed=0"
+        }
+      ],
+      "parking_refusals": 0,
+      "restores": 6,
+      "revisit_prompt_read": 90,
+      "cache_lines": [
+        "strata hc: CUDA0: the hyper-connection read runs as staged (the norm per token and stream, the down projection's activations staged ahead by cp.async); checked bit for bit against the plain read on this card (STRATA_HC_SPLIT=1 or 0 for the earlier ones)",
+        "strata serve: conversation cache: parked 1840 tokens in 87.8 ms; parked=1 bytes=500371716 evictions=0 snapshot_bytes=500371716 reused_kv_bytes=0",
+        "strata serve: conversation cache: parked 1839 tokens in 87.2 ms; parked=2 bytes=1000737284 evictions=0 snapshot_bytes=500365568 reused_kv_bytes=0",
+        "strata serve: conversation cache: parked 1840 tokens in 102.0 ms; parked=3 bytes=1501109000 evictions=0 snapshot_bytes=500371716 reused_kv_bytes=0",
+        "strata serve: conversation cache: parked 1840 tokens in 85.3 ms; parked=3 bytes=1501109000 evictions=1 snapshot_bytes=500371716 reused_kv_bytes=0",
+        "strata serve: conversation cache: parked 1840 tokens in 86.9 ms; parked=3 bytes=1501115148 evictions=2 snapshot_bytes=500371716 reused_kv_bytes=0",
+        "strata serve: conversation cache: parked 1862 tokens in 125.2 ms; parked=3 bytes=1501475516 evictions=2 snapshot_bytes=500732084 reused_kv_bytes=0",
+        "strata serve: conversation cache: restored 1840 tokens (live) in 41.2 ms; parked=3 bytes=1529579436",
+        "strata serve: conversation cache: parked 1867 tokens in 125.7 ms; parked=3 bytes=1625100128 evictions=2 snapshot_bytes=623996328 reused_kv_bytes=28081536",
+        "strata serve: conversation cache: restored 1840 tokens (live) in 43.2 ms; parked=3 bytes=1653204048",
+        "strata serve: conversation cache: parked 1867 tokens in 112.1 ms; parked=3 bytes=1748364372 evictions=2 snapshot_bytes=623996328 reused_kv_bytes=28081536",
+        "strata serve: conversation cache: restored 1862 tokens (live) in 43.7 ms; parked=3 bytes=1776828572",
+        "strata serve: conversation cache: parked 1889 tokens in 118.8 ms; parked=3 bytes=1748764764 evictions=2 snapshot_bytes=624396720 reused_kv_bytes=28391040",
+        "strata serve: conversation cache: restored 1856 tokens (checkpoint) in 45.6 ms; parked=3 bytes=1782422456",
+        "strata serve: conversation cache: parked 1867 tokens in 119.3 ms; parked=3 bytes=1748764764 evictions=2 snapshot_bytes=623996328 reused_kv_bytes=28325760",
+        "strata serve: conversation cache: restored 1856 tokens (checkpoint) in 55.2 ms; parked=3 bytes=1782422456",
+        "strata serve: conversation cache: parked 1867 tokens in 94.9 ms; parked=3 bytes=1748364372 evictions=2 snapshot_bytes=623996328 reused_kv_bytes=28325760",
+        "strata serve: conversation cache: restored 1878 tokens (checkpoint) in 48.3 ms; parked=3 bytes=1782422280"
+      ]
+    },
+    {
+      "label": "fixed-async",
+      "binary_sha256": "0df1b29a71a91e75ed59b54da200d82cd29d2205baebcd6171d9934f3890cf41",
+      "settings": {
+        "args": [
+          "--pack",
+          "<PACK>",
+          "--native",
+          "<NATIVE>",
+          "--ple-gguf",
+          "<PLE_GGUF>",
+          "--expert-profile",
+          "<EXPERT_PROFILE>",
+          "--expert-cache",
+          "4416",
+          "--prefill",
+          "auto",
+          "--spec",
+          "6",
+          "--spec-min-p",
+          "0.5",
+          "--mtp",
+          "<MTP>",
+          "--max-context",
+          "131072",
+          "--kv",
+          "int8",
+          "--resident-experts",
+          "--mtp-max-t",
+          "4",
+          "--suffix-draft",
+          "3",
+          "--lookup-chain",
+          "0",
+          "--conversation-cache-mib",
+          "4096",
+          "--conversation-cache-slots",
+          "3",
+          "--prompt-cache",
+          "6",
+          "--prompt-cache-every",
+          "16384",
+          "--pcie-frac",
+          "0",
+          "--adapt-swaps",
+          "0",
+          "--resident-budget-gib",
+          "8"
+        ],
+        "env": {
+          "HIP_VISIBLE_DEVICES": "1",
+          "STRATA_HIPBLASLT_TUNING": "<HIP_TUNING_FILE>",
+          "STRATA_RESIDENT_PIN": "0",
+          "STRATA_SPEC_PROB": "1",
+          "STRATA_SPEC_PROB_GATE": "pick",
+          "STRATA_IQ_MT_MIN": "1",
+          "STRATA_SNAPSHOT_VERIFY": "1",
+          "STRATA_PARK_ASYNC": "1",
+          "STRATA_CKPT_ASYNC": "1"
+        }
+      },
+      "requests": [
+        {
+          "output_ids": [
+            588,
+            248046
+          ],
+          "produced": 2,
+          "prompt_read": 213,
+          "raw_done": "DONE 2 213 3140.5 196.1 stop 2 3 0 1265 2400 646 120 109.2 213 0 chunk=196 experts_streamed=3476"
+        },
+        {
+          "output_ids": [
+            19186,
+            248046
+          ],
+          "produced": 2,
+          "prompt_read": 17,
+          "raw_done": "DONE 2 213 266.0 120.0 stop 2 3 196 1287 2400 652 121 31.7 17 0 chunk=0 experts_streamed=0"
+        },
+        {
+          "output_ids": [
+            44061,
+            248046
+          ],
+          "produced": 2,
+          "prompt_read": 1385,
+          "raw_done": "DONE 2 1581 4086.8 148.1 stop 2 3 196 1335 2400 597 108 83.5 1385 0 chunk=1378 experts_streamed=7012"
+        },
+        {
+          "output_ids": [
+            85,
+            29899,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 252,
+          "raw_done": "DONE 3 1836 2948.7 227.3 stop 3 3 1584 1211 2400 700 185 199.4 252 0 chunk=245 experts_streamed=3690"
+        },
+        {
+          "output_ids": [
+            14778,
+            248046
+          ],
+          "produced": 2,
+          "prompt_read": 262,
+          "raw_done": "DONE 2 1836 3096.6 191.5 stop 2 3 1574 1212 2400 709 143 132.4 262 0 chunk=255 experts_streamed=3810"
+        },
+        {
+          "output_ids": [
+            1931,
+            277,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 262,
+          "raw_done": "DONE 3 1836 3149.1 257.0 stop 3 3 1574 1169 2400 710 206 232.1 262 0 chunk=255 experts_streamed=3819"
+        },
+        {
+          "output_ids": [
+            273,
+            1588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 262,
+          "raw_done": "DONE 3 1836 3086.5 272.3 stop 3 3 1574 1156 2400 706 199 232.1 262 0 chunk=255 experts_streamed=3789"
+        },
+        {
+          "output_ids": [
+            5816,
+            278,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 262,
+          "raw_done": "DONE 3 1836 3175.5 246.9 stop 3 3 1574 1161 2400 707 191 237.4 262 0 chunk=255 experts_streamed=3783"
+        },
+        {
+          "output_ids": [
+            474,
+            7588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 284,
+          "raw_done": "DONE 3 1858 3271.9 261.7 stop 3 3 1574 1157 2400 701 200 247.1 284 0 chunk=277 experts_streamed=3901"
+        },
+        {
+          "output_ids": [
+            273,
+            1588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 23,
+          "raw_done": "DONE 3 1863 554.6 251.3 stop 3 3 1840 1144 2400 670 238 232.6 23 0 chunk=0 experts_streamed=0"
+        },
+        {
+          "output_ids": [
+            5816,
+            278,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 23,
+          "raw_done": "DONE 3 1863 629.5 249.1 stop 3 3 1840 1145 2400 693 227 225.6 23 0 chunk=0 experts_streamed=0"
+        },
+        {
+          "output_ids": [
+            474,
+            7588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 23,
+          "raw_done": "DONE 3 1885 554.9 235.8 stop 3 3 1862 1148 2400 689 220 218.9 23 0 chunk=0 experts_streamed=0"
+        },
+        {
+          "output_ids": [
+            273,
+            1588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 7,
+          "raw_done": "DONE 3 1863 281.1 253.8 stop 3 3 1856 1144 2400 670 238 239.4 7 0 chunk=0 experts_streamed=0"
+        },
+        {
+          "output_ids": [
+            5816,
+            278,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 7,
+          "raw_done": "DONE 3 1863 263.5 252.8 stop 3 3 1856 1145 2400 693 227 227.8 7 0 chunk=0 experts_streamed=0"
+        },
+        {
+          "output_ids": [
+            474,
+            7588,
+            248046
+          ],
+          "produced": 3,
+          "prompt_read": 7,
+          "raw_done": "DONE 3 1885 275.0 252.9 stop 3 3 1878 1148 2400 689 220 226.7 7 0 chunk=0 experts_streamed=0"
+        }
+      ],
+      "parking_refusals": 0,
+      "restores": 6,
+      "revisit_prompt_read": 90,
+      "cache_lines": [
+        "strata hc: CUDA0: the hyper-connection read runs as staged (the norm per token and stream, the down projection's activations staged ahead by cp.async); checked bit for bit against the plain read on this card (STRATA_HC_SPLIT=1 or 0 for the earlier ones)",
+        "strata serve: conversation cache: parked 1840 tokens in 68.9 ms; parked=1 bytes=500371716 evictions=0 snapshot_bytes=500371716 reused_kv_bytes=0",
+        "strata serve: conversation cache: parked 1839 tokens in 69.5 ms; parked=2 bytes=1000737284 evictions=0 snapshot_bytes=500365568 reused_kv_bytes=0",
+        "strata serve: conversation cache: parked 1840 tokens in 70.1 ms; parked=3 bytes=1501109000 evictions=0 snapshot_bytes=500371716 reused_kv_bytes=0",
+        "strata serve: conversation cache: parked 1840 tokens in 80.2 ms; parked=3 bytes=1501109000 evictions=1 snapshot_bytes=500371716 reused_kv_bytes=0",
+        "strata serve: conversation cache: parked 1840 tokens in 68.1 ms; parked=3 bytes=1501115148 evictions=2 snapshot_bytes=500371716 reused_kv_bytes=0",
+        "strata serve: conversation cache: parked 1862 tokens in 32.0 ms; parked=3 bytes=1501475516 evictions=2 snapshot_bytes=500732084 reused_kv_bytes=0",
+        "strata serve: conversation cache: restored 1840 tokens (live) in 22.1 ms; parked=3 bytes=1529579436",
+        "strata serve: conversation cache: parked 1867 tokens in 27.6 ms; parked=3 bytes=1625100128 evictions=2 snapshot_bytes=623996328 reused_kv_bytes=28081536",
+        "strata serve: conversation cache: restored 1840 tokens (live) in 22.1 ms; parked=3 bytes=1653204048",
+        "strata serve: conversation cache: parked 1867 tokens in 26.1 ms; parked=3 bytes=1748364372 evictions=2 snapshot_bytes=623996328 reused_kv_bytes=28081536",
+        "strata serve: conversation cache: restored 1862 tokens (live) in 21.8 ms; parked=3 bytes=1776828572",
+        "strata serve: conversation cache: parked 1889 tokens in 27.5 ms; parked=3 bytes=1748764764 evictions=2 snapshot_bytes=624396720 reused_kv_bytes=28391040",
+        "strata serve: conversation cache: restored 1856 tokens (checkpoint) in 23.4 ms; parked=3 bytes=1782422456",
+        "strata serve: conversation cache: parked 1867 tokens in 24.6 ms; parked=3 bytes=1748764764 evictions=2 snapshot_bytes=623996328 reused_kv_bytes=28325760",
+        "strata serve: conversation cache: restored 1856 tokens (checkpoint) in 25.0 ms; parked=3 bytes=1782422456",
+        "strata serve: conversation cache: parked 1867 tokens in 25.9 ms; parked=3 bytes=1748364372 evictions=2 snapshot_bytes=623996328 reused_kv_bytes=28325760",
+        "strata serve: conversation cache: restored 1878 tokens (checkpoint) in 22.9 ms; parked=3 bytes=1782422280"
+      ]
+    }
+  ],
+  "source": {
+    "commit": "3d502f474a0842f92827f620fd026be23f870657",
+    "files": {
+      "include/strata/core/conversation_cache.hpp": "3a20d840a6fa211e82d8c959588b7eb7ebacdd0a4bd433b0299d5fe79af56356",
+      "include/strata/core/session_save_reclaim.hpp": "0bc9daddd7e530d5295a2e574ad30502f4b91a406fab8ed8ed67c976f27f9934",
+      "src/core/conversation_cache_test.cpp": "27237cfe8d915ff342fe4a5f770c8f79b41a54493e21c0dc127b846a87e3c6a1",
+      "src/core/session_save_reclaim_test.cpp": "2354acc5d5508e3a77c6095edbf877615518cc52fc3d1c8eed5f8d82a11fa3c6"
+    }
+  },
+  "output_mismatches": {
+    "fixed": [],
+    "fixed-async": []
+  },
+  "elapsed_seconds": 317.1108088493347
+}

@@ -1,0 +1,9 @@
+{
+  "commit": "3d502f474a0842f92827f620fd026be23f870657",
+  "files": {
+    "include/strata/core/conversation_cache.hpp": "3a20d840a6fa211e82d8c959588b7eb7ebacdd0a4bd433b0299d5fe79af56356",
+    "include/strata/core/session_save_reclaim.hpp": "0bc9daddd7e530d5295a2e574ad30502f4b91a406fab8ed8ed67c976f27f9934",
+    "src/core/conversation_cache_test.cpp": "27237cfe8d915ff342fe4a5f770c8f79b41a54493e21c0dc127b846a87e3c6a1",
+    "src/core/session_save_reclaim_test.cpp": "2354acc5d5508e3a77c6095edbf877615518cc52fc3d1c8eed5f8d82a11fa3c6"
+  }
+}
